@@ -11,7 +11,8 @@ Use the smallest working path for this repository.
 ## Cloud
 
 - Codex Cloud requires this repository to be hosted on GitHub and authorized in Codex settings.
-- Configure the Cloud environment setup script to mirror the local setup logic:
+- Configure the Cloud environment setup script in the Codex Cloud UI. Do not try to run `.codex/environments/environment.toml` directly in Cloud.
+- Use this setup script:
 
 ```sh
 if [ -f package.json ]; then

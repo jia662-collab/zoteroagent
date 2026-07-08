@@ -3,17 +3,17 @@ version = 1
 name = "zoteroagent"
 
 [setup]
-script = """
-if (Test-Path package.json) {
+script = '''
+if [ -f package.json ]; then
   npm install
-} elseif (Test-Path requirements.txt) {
+elif [ -f requirements.txt ]; then
   python -m pip install -r requirements.txt
-} elseif (Test-Path pyproject.toml) {
+elif [ -f pyproject.toml ]; then
   python -m pip install -e .
-} else {
-  Write-Host "No dependency manifest found; setup skipped."
-}
-"""
+else
+  echo "No dependency manifest found; setup skipped."
+fi
+'''
 
 [[actions]]
 name = "Status"
@@ -23,4 +23,4 @@ command = "git status --short"
 [[actions]]
 name = "Test"
 icon = "run"
-command = "if (Test-Path package.json) { npm test } elseif (Test-Path requirements.txt -or Test-Path pyproject.toml) { python -m pytest } else { Write-Host 'No test command configured yet.' }"
+command = "if [ -f package.json ]; then npm test; elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then python -m pytest; else echo 'No test command configured yet.'; fi"
