@@ -1,0 +1,3 @@
+# Copy ignored local config into Codex-managed worktrees only when these files exist.
+.env
+.env.local
