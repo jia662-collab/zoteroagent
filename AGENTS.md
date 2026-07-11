@@ -1,31 +1,25 @@
-# Codex Instructions
+# PaperLab Agent Rules
 
-Use the smallest working path for this repository.
+## 自动路由
 
-## Local and Worktree
+- 论文检索、Zotero 导入、筛选、精读、比较、综述、争议、知识缺口以及“开始研究”“继续”“恢复项目”等请求，必须使用 `.agents/skills/paper-research/SKILL.md`。
+- 每个 Codex 任务只绑定一个研究项目。不得创建全局“当前项目”。
+- 每次继续工作前读取该项目的 `PROJECT.md` 和 `STATUS.md`，并调用内部 `status` 核对实际状态。
+- 不得依赖聊天历史作为唯一状态来源。
 
-- Use `.codex/environments/environment.toml` for Codex app worktree setup and quick actions.
-- Do not commit secrets. Put local-only values in `.env` or `.env.local`.
-- If a worktree needs ignored local files, list only those files in `.worktreeinclude`.
+## 学术可信度
 
-## Cloud
+1. 不虚构论文、作者、DOI、数据、图表、结论或引用。
+2. 不根据标题猜测内容，不把摘要当作全文证据。
+3. 重要结论尽量提供页码、章节、图号或表号。
+4. 数值保留单位、样本和实验或调查条件。
+5. 区分作者明确陈述、数据直接支持、合理推断、Codex 的解释和无法确认。
 
-- Codex Cloud requires this repository to be hosted on GitHub and authorized in Codex settings.
-- Configure the Cloud environment setup script in the Codex Cloud UI. Do not try to run `.codex/environments/environment.toml` directly in Cloud.
-- Use this setup script:
+## 文件与版权安全
 
-```sh
-if [ -f package.json ]; then
-  npm install
-elif [ -f requirements.txt ]; then
-  python -m pip install -r requirements.txt
-elif [ -f pyproject.toml ]; then
-  python -m pip install -e .
-else
-  echo "No dependency manifest found; setup skipped."
-fi
-```
-
-## Checks
-
-- Before reporting code changes, run the smallest available check: `npm test`, `python -m pytest`, or a direct command that exercises the edited file.
+1. 不直接修改 `zotero.sqlite` 或 Zotero `storage`。
+2. 不修改、移动、重命名、覆盖或删除原始 PDF。
+3. 不绕过付费墙、登录、验证码或版权限制。
+4. 自动分析不得覆盖笔记中的“人工确认”部分。
+5. 公开仓库不得提交 `research/`、`bibliography/library.bib`、PDF、全文缓存、密钥、Cookie 或本机 Zotero 路径。
+6. 默认使用中文和 UTF-8。
