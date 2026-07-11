@@ -59,6 +59,21 @@ def test_readme_starts_with_research_actions_not_commands():
     assert "config/research_profile.yaml" not in text
 
 
+def test_readme_contains_concrete_end_to_end_steps():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    for instruction in [
+        "右键“我的文库”",
+        "Keep updated",
+        "文件 > 导入",
+        "zotero_import.ris",
+        "我已经导入并添加 PDF，继续",
+        "research/projects/<项目编号>/search.md",
+        "从我的 Zotero 中筛选",
+        "pending_push",
+    ]:
+        assert instruction in text
+
+
 def test_old_operator_facing_structure_is_removed():
     for relative in ["config", "prompts", "scripts", "tables", "reports", "notes", "papers", "synthesis", "flashcards", "inbox"]:
         assert not (ROOT / relative).exists(), relative
