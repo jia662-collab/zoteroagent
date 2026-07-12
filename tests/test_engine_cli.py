@@ -198,6 +198,44 @@ def test_read_outline_preserves_body_before_numbered_references_on_same_page(tmp
     assert result["sections"][-1]["end_page"] == 2
 
 
+def test_read_outline_keeps_same_page_toc_sections_readable(tmp_path: Path):
+    pdf = tmp_path / "same-page-toc-sections.pdf"
+    doc = fitz.open()
+    for text in [
+        "1 Introduction\n2 Methods\n" + "Shared page content. " * 8,
+        "3 Results\n" + "Result evidence. " * 8,
+    ]:
+        page = doc.new_page()
+        page.insert_textbox(fitz.Rect(72, 72, 520, 760), text, fontsize=14)
+    doc.set_toc([[1, "1 Introduction", 1], [1, "2 Methods", 1], [1, "3 Results", 2]])
+    doc.save(pdf)
+    doc.close()
+
+    result = run_engine("read", "--pdf", pdf, "--cache-dir", tmp_path / "cache", "--outline")
+
+    assert [(section["start_page"], section["end_page"]) for section in result["sections"]] == [(1, 1), (1, 1), (2, 2)]
+
+
+def test_read_outline_keeps_body_when_toc_references_share_its_page(tmp_path: Path):
+    pdf = tmp_path / "toc-reference-same-page.pdf"
+    doc = fitz.open()
+    for text in [
+        "1 Introduction\n" + "Background evidence. " * 8,
+        "2 Conclusion\nFinal body text remains readable.\nReferences\n[1] Citation",
+    ]:
+        page = doc.new_page()
+        page.insert_textbox(fitz.Rect(72, 72, 520, 760), text, fontsize=14)
+    doc.set_toc([[1, "1 Introduction", 1], [1, "2 Conclusion", 2], [1, "References", 2]])
+    doc.save(pdf)
+    doc.close()
+
+    result = run_engine("read", "--pdf", pdf, "--cache-dir", tmp_path / "cache", "--outline")
+
+    assert result["references_start"] == 2
+    assert result["sections"][-1]["start_page"] == 2
+    assert result["sections"][-1]["end_page"] == 2
+
+
 def test_sync_reports_candidate_zotero_and_pdf_readiness(tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"pdf placeholder")
