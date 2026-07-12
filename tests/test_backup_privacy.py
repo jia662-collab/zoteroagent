@@ -89,6 +89,32 @@ def test_backup_rejects_sensitive_staged_content(tmp_path: Path):
     assert not (data / ".git" / "refs" / "heads" / "main").exists()
 
 
+def test_backup_rejects_local_figure_assets(tmp_path: Path):
+    data, project_id = init_private_repo(tmp_path)
+    asset = data / "projects" / project_id / "assets" / "paper" / "figure-01.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"derived figure")
+    assert "**/assets/" in (data / ".gitignore").read_text(encoding="utf-8").splitlines()
+    git(data, "add", "-f", str(asset.relative_to(data)))
+
+    cp = run_process(
+        "checkpoint",
+        "--data-root",
+        data,
+        "--project",
+        project_id,
+        "--stage",
+        "reading",
+        "--next",
+        "继续精读",
+        "--backup",
+        "--no-push",
+    )
+
+    assert cp.returncode == 2
+    assert json.loads(cp.stdout)["error"] == "sensitive_backup_content"
+
+
 def test_backup_rejects_zotero_storage_path_in_staged_text(tmp_path: Path):
     data, project_id = init_private_repo(tmp_path)
     note = data / "projects" / project_id / "papers" / "unsafe.md"
@@ -117,6 +143,35 @@ def test_backup_rejects_zotero_storage_path_in_staged_text(tmp_path: Path):
     assert cp.returncode == 2
     assert json.loads(cp.stdout)["error"] == "sensitive_backup_content"
     assert not (data / ".git" / "refs" / "heads" / "main").exists()
+
+
+def test_backup_scans_large_text_and_forward_slash_zotero_paths(tmp_path: Path):
+    data, project_id = init_private_repo(tmp_path)
+    note = data / "projects" / project_id / "papers" / "large-unsafe.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text(
+        ("research notes\n" * 150_000) + "附件：C:/Users/Researcher/Zotero/storage/ABCD1234/paper.pdf\n",
+        encoding="utf-8",
+    )
+    assert note.stat().st_size > 2_000_000
+    git(data, "add", str(note.relative_to(data)))
+
+    cp = run_process(
+        "checkpoint",
+        "--data-root",
+        data,
+        "--project",
+        project_id,
+        "--stage",
+        "reading",
+        "--next",
+        "精读",
+        "--backup",
+        "--no-push",
+    )
+
+    assert cp.returncode == 2
+    assert json.loads(cp.stdout)["error"] == "sensitive_backup_content"
 
 
 def test_pending_push_is_retried_at_next_checkpoint(tmp_path: Path):

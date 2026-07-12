@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -15,8 +16,6 @@ from typing import Any
 
 PROJECT_BUDGET = 4096
 STATUS_BUDGET = 2048
-READ_MAX_PAGES = 8
-READ_MAX_CHARS = 20_000
 
 
 class PaperLabError(Exception):
@@ -47,8 +46,8 @@ def normalize_doi(value: str | None) -> str:
 def normalize_title(value: str | None) -> str:
     if not value:
         return ""
-    result = re.sub(r"[{}]", "", value).lower()
-    result = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", result)
+    result = unicodedata.normalize("NFKC", re.sub(r"[{}]", "", value)).casefold()
+    result = "".join(character if character.isalnum() else " " for character in result)
     return re.sub(r"\s+", " ", result).strip()
 
 
@@ -69,6 +68,20 @@ def atomic_write(path: Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -176,6 +189,7 @@ def private_gitignore() -> str:
 .env.*
 cache/
 **/cache/
+**/assets/
 *.log
 .paperlab/
 """
@@ -342,18 +356,23 @@ def sensitive_staged_paths(data_root: Path, paths: list[str]) -> list[str]:
     for relative in paths:
         normalized = relative.replace("\\", "/")
         lower = normalized.lower()
-        if lower.endswith((".pdf", ".bib", ".sqlite")) or "/cache/" in f"/{lower}/":
+        if lower.endswith((".pdf", ".bib", ".sqlite")) or any(segment in f"/{lower}/" for segment in ("/cache/", "/assets/")):
             problems.append(relative)
             continue
         path = (data_root / relative).resolve()
-        if not path.is_file() or path.stat().st_size > 2_000_000:
+        if not path.is_file():
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            with path.open("r", encoding="utf-8") as handle:
+                carry = ""
+                while chunk := handle.read(64 * 1024):
+                    normalized_text = (carry + chunk).replace("\\", "/")
+                    if re.search(r"(?i)[a-z]:/[^\r\n]*/zotero/storage/", normalized_text):
+                        problems.append(relative)
+                        break
+                    carry = normalized_text[-4096:]
         except (UnicodeDecodeError, OSError):
             continue
-        if re.search(r"(?i)[a-z]:\\[^\r\n]*\\zotero\\storage\\", text):
-            problems.append(relative)
     return problems
 
 
@@ -562,7 +581,73 @@ def parse_bibtex(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     return entries, errors
 
 
-def sync_library(bibtex: Path, index: Path) -> dict[str, Any]:
+def existing_pdfs(record: dict[str, Any]) -> list[str]:
+    return [path for path in record.get("file") or [] if path.lower().endswith(".pdf") and Path(path).is_file()]
+
+
+def match_candidates(entries: list[dict[str, Any]], candidates_path: Path) -> dict[str, Any]:
+    if not candidates_path.exists():
+        raise PaperLabError("candidates_not_found", str(candidates_path))
+    candidates = read_json(candidates_path)
+    matches: list[dict[str, Any]] = []
+    ready = missing_pdf = not_in_zotero = 0
+    for candidate in candidates:
+        doi = normalize_doi(candidate.get("doi"))
+        title = normalize_title(candidate.get("title"))
+        doi_records = [record for record in entries if doi and record["doi"] == doi]
+        title_records = [record for record in entries if title and record["normalized_title"] == title]
+        if doi_records:
+            records = doi_records + [
+                record
+                for record in title_records
+                if record not in doi_records and (not record["doi"] or record["doi"] == doi)
+            ]
+            matched_by = "doi"
+        else:
+            records = title_records
+            matched_by = "title" if records else ""
+        if not records:
+            not_in_zotero += 1
+            matches.append(
+                {
+                    "candidate_id": candidate.get("id"),
+                    "status": "not_in_zotero",
+                    "matched_by": "",
+                    "citation_key": "",
+                    "pdf_count": 0,
+                    "duplicate_keys": [],
+                }
+            )
+            continue
+        ranked = sorted(records, key=lambda record: len(existing_pdfs(record)), reverse=True)
+        preferred = ranked[0]
+        pdf_count = len(existing_pdfs(preferred))
+        status = "ready" if pdf_count else "missing_pdf"
+        ready += status == "ready"
+        missing_pdf += status == "missing_pdf"
+        matches.append(
+            {
+                "candidate_id": candidate.get("id"),
+                "status": status,
+                "matched_by": matched_by,
+                "citation_key": preferred["citation_key"],
+                "pdf_count": pdf_count,
+                "duplicate_keys": [record["citation_key"] for record in records] if len(records) > 1 else [],
+            }
+        )
+    return {
+        "readiness": {
+            "candidate_count": len(candidates),
+            "matched": ready + missing_pdf,
+            "ready": ready,
+            "missing_pdf": missing_pdf,
+            "not_in_zotero": not_in_zotero,
+        },
+        "matches": matches,
+    }
+
+
+def sync_library(bibtex: Path, index: Path, candidates: Path | None = None) -> dict[str, Any]:
     bibtex = bibtex.resolve()
     index = index.resolve()
     if not bibtex.exists():
@@ -571,7 +656,10 @@ def sync_library(bibtex: Path, index: Path) -> dict[str, Any]:
     if errors:
         raise PaperLabError("bibtex_parse_error", "; ".join(errors))
     write_json(index, entries)
-    return {"entry_count": len(entries), "fingerprint": file_sha256(bibtex), "index": str(index)}
+    result = {"entry_count": len(entries), "fingerprint": file_sha256(bibtex), "index": str(index)}
+    if candidates:
+        result.update(match_candidates(entries, candidates.resolve()))
+    return result
 
 
 def extract_pdf(pdf: Path, cache_dir: Path) -> dict[str, Any]:
@@ -614,47 +702,278 @@ def parse_page_spec(value: str | None, page_count: int) -> list[int]:
     if not value:
         return list(range(page_count))
     selected: list[int] = []
-    for part in value.split(","):
-        if "-" in part:
-            start, end = (int(item) for item in part.split("-", 1))
+    for raw_part in value.split(","):
+        part = raw_part.strip()
+        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+        page_match = re.fullmatch(r"\d+", part)
+        if range_match:
+            start, end = (int(item) for item in range_match.groups())
+            if start < 1 or end < start or end > page_count:
+                raise PaperLabError("invalid_page_spec", value)
             selected.extend(range(start - 1, end))
+        elif page_match:
+            page = int(part)
+            if not 1 <= page <= page_count:
+                raise PaperLabError("invalid_page_spec", value)
+            selected.append(page - 1)
         else:
-            selected.append(int(part) - 1)
-    return [index for index in selected if 0 <= index < page_count]
+            raise PaperLabError("invalid_page_spec", value)
+    return selected
 
 
-def bounded_read(pdf: Path, cache_dir: Path, page_spec: str | None) -> dict[str, Any]:
+def read_pages(pdf: Path, cache_dir: Path, page_spec: str | None) -> dict[str, Any]:
     extracted = extract_pdf(pdf, cache_dir)
     if extracted["status"] != "ok":
         return extracted
     all_pages = extracted["pages"]
     indexes = parse_page_spec(page_spec, len(all_pages))
-    output: list[dict[str, Any]] = []
-    characters = 0
-    truncated = len(indexes) > READ_MAX_PAGES
-    for index in indexes[:READ_MAX_PAGES]:
-        page = all_pages[index]
-        remaining = READ_MAX_CHARS - characters
-        if remaining <= 0:
-            truncated = True
-            break
-        text = page["text"]
-        if len(text) > remaining:
-            text = text[:remaining]
-            truncated = True
-        output.append({"page": page["page"], "text": text})
-        characters += len(text)
-        if len(text) < len(page["text"]):
-            break
-    if len(output) < len(indexes):
-        truncated = True
+    output = [all_pages[index] for index in indexes]
     return {
         "status": "ok",
         "pages": output,
         "source_sha256": extracted["source_sha256"],
         "page_count": extracted["page_count"],
-        "truncated": truncated,
-        "character_count": characters,
+        "truncated": False,
+        "character_count": sum(len(page["text"]) for page in output),
+    }
+
+
+SECTION_HEADING = re.compile(r"^\s*(?:\d+(?:\.\d+)*[.)]?\s+)([^\n]{2,100})\s*$")
+SECTION_NUMBER = re.compile(r"^\d+(?:\.\d+)*[.)]?$")
+REFERENCE_HEADING = re.compile(r"^\s*(?:\d+(?:\.\d+)*[.)]?\s+)?(?:references|bibliography)\s*$", re.I)
+
+
+def _title_like(value: str) -> bool:
+    return bool(value and len(value) <= 80 and (value[0].isupper() or "\u4e00" <= value[0] <= "\u9fff"))
+
+
+def _reference_boundary(pages: list[dict[str, Any]]) -> tuple[int | None, int | None]:
+    for page in pages:
+        lines = [line.strip() for line in page["text"].splitlines() if line.strip()]
+        for line_index, line in enumerate(lines):
+            if REFERENCE_HEADING.fullmatch(line):
+                page_number = page["page"]
+                return page_number, page_number - 1 if line_index == 0 else page_number
+    return None, None
+
+
+def _heuristic_outline(pages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int | None]:
+    headings: list[tuple[str, int]] = []
+    references_start, content_end_page = _reference_boundary(pages)
+    for page in pages:
+        lines = [line.strip() for line in page["text"].splitlines() if line.strip()]
+        for line_index, line in enumerate(lines):
+            if REFERENCE_HEADING.fullmatch(line):
+                break
+            match = SECTION_HEADING.fullmatch(line)
+            title = match.group(1).strip() if match else ""
+            if not title and SECTION_NUMBER.fullmatch(line) and line_index + 1 < len(lines):
+                title = lines[line_index + 1]
+            if _title_like(title):
+                headings.append((title, page["page"]))
+                break
+        if references_start == page["page"]:
+            break
+    sections: list[dict[str, Any]] = []
+    for index, (title, start_page) in enumerate(headings):
+        next_start = headings[index + 1][1] if index + 1 < len(headings) else (content_end_page or len(pages)) + 1
+        sections.append({"title": title, "start_page": start_page, "end_page": next_start - 1, "source": "heuristic"})
+    return sections, references_start
+
+
+def read_outline(pdf: Path, cache_dir: Path) -> dict[str, Any]:
+    extracted = extract_pdf(pdf, cache_dir)
+    if extracted["status"] != "ok":
+        return extracted
+    sections: list[dict[str, Any]] = []
+    fallback_references, fallback_content_end = _reference_boundary(extracted["pages"])
+    try:
+        import fitz
+
+        with fitz.open(pdf.resolve()) as document:
+            raw_toc = [(level, title.strip(), page) for level, title, page, *_ in document.get_toc() if page > 0]
+    except Exception:
+        raw_toc = []
+    toc_references = next((page for _, title, page in raw_toc if REFERENCE_HEADING.fullmatch(title)), None)
+    references_start = toc_references or fallback_references
+    content_end_page = (toc_references - 1) if toc_references else fallback_content_end
+    toc = [(title, page) for level, title, page in raw_toc if level == 1 and not REFERENCE_HEADING.fullmatch(title)]
+    if toc:
+        for index, (title, start_page) in enumerate(toc):
+            next_start = toc[index + 1][1] if index + 1 < len(toc) else extracted["page_count"] + 1
+            end_page = next_start - 1
+            if references_start and start_page <= references_start < next_start and content_end_page is not None:
+                end_page = min(end_page, content_end_page)
+            sections.append({"title": title, "start_page": start_page, "end_page": end_page, "source": "toc"})
+    else:
+        sections, references_start = _heuristic_outline(extracted["pages"])
+    return {
+        "status": "ok",
+        "page_count": extracted["page_count"],
+        "sections": sections,
+        "references_start": references_start,
+        "source_sha256": extracted["source_sha256"],
+    }
+
+
+def parse_clip(value: str | None) -> list[float]:
+    if not value:
+        return [0.0, 0.0, 1.0, 1.0]
+    try:
+        clip = [float(item.strip()) for item in value.split(",")]
+    except ValueError as error:
+        raise PaperLabError("invalid_clip", value) from error
+    if len(clip) != 4 or not (0 <= clip[0] < clip[2] <= 1 and 0 <= clip[1] < clip[3] <= 1):
+        raise PaperLabError("invalid_clip", value)
+    return clip
+
+
+def _normalized_box(rect: Any, page_rect: Any, padding: float = 0.0) -> list[float]:
+    return [
+        max(0.0, round((rect.x0 - page_rect.x0) / page_rect.width - padding, 4)),
+        max(0.0, round((rect.y0 - page_rect.y0) / page_rect.height - padding, 4)),
+        min(1.0, round((rect.x1 - page_rect.x0) / page_rect.width + padding, 4)),
+        min(1.0, round((rect.y1 - page_rect.y0) / page_rect.height + padding, 4)),
+    ]
+
+
+def inspect_page(pdf: Path, page_number: int, label: str) -> dict[str, Any]:
+    pdf = pdf.resolve()
+    if not pdf.exists():
+        raise PaperLabError("pdf_not_found", str(pdf))
+    try:
+        import fitz
+
+        with fitz.open(pdf) as document:
+            if document.needs_pass or document.is_encrypted:
+                raise PaperLabError("encrypted_pdf", str(pdf))
+            if not 1 <= page_number <= document.page_count:
+                raise PaperLabError("invalid_page", str(page_number))
+            page = document.load_page(page_number - 1)
+            page_rect = page.rect
+            text_blocks = [block for block in page.get_text("blocks") if len(block) > 6 and block[6] == 0]
+            object_rects = [fitz.Rect(drawing["rect"]) for drawing in page.get_drawings()]
+            object_rects.extend(
+                fitz.Rect(block["bbox"])
+                for block in page.get_text("dict").get("blocks", [])
+                if block.get("type") == 1
+            )
+            object_rects = [rect for rect in object_rects if not rect.is_infinite and rect.width + rect.height > 4]
+            object_rects = [
+                fitz.Rect(
+                    rect.x0 - (1 if rect.width == 0 else 0),
+                    rect.y0 - (1 if rect.height == 0 else 0),
+                    rect.x1 + (1 if rect.width == 0 else 0),
+                    rect.y1 + (1 if rect.height == 0 else 0),
+                )
+                for rect in object_rects
+            ]
+
+            needle = normalize_title(label)
+            matches: list[dict[str, Any]] = []
+            for block in text_blocks:
+                text = re.sub(r"\s+", " ", block[4]).strip()
+                normalized_text = normalize_title(text)
+                if normalized_text != needle and not normalized_text.startswith(needle + " "):
+                    continue
+                caption = fitz.Rect(block[:4])
+                horizontal_margin = page_rect.width * 0.1
+
+                def nearby(rect: Any, direction: str) -> bool:
+                    overlaps_column = rect.x1 >= caption.x0 - horizontal_margin and rect.x0 <= caption.x1 + horizontal_margin
+                    if not overlaps_column:
+                        return False
+                    if direction == "above":
+                        return rect.y1 <= caption.y0 + page_rect.height * 0.03 and caption.y0 - rect.y1 <= page_rect.height * 0.45
+                    return rect.y0 >= caption.y1 - page_rect.height * 0.03 and rect.y0 - caption.y1 <= page_rect.height * 0.45
+
+                above = [rect for rect in object_rects if nearby(rect, "above")]
+                below = [rect for rect in object_rects if nearby(rect, "below")]
+                score = lambda rects: sum(max(rect.width, 2) * max(rect.height, 2) for rect in rects)
+                above_score, below_score = score(above), score(below)
+                if above_score or below_score:
+                    direction = "above" if above_score >= below_score else "below"
+                    selected = above if direction == "above" else below
+                    region = fitz.Rect(caption)
+                    for rect in selected:
+                        region.include_rect(rect)
+                    confidence = "high"
+                else:
+                    direction = "above" if normalize_title(label).startswith(("fig ", "figure ")) else "below"
+                    if direction == "above":
+                        region = fitz.Rect(page_rect.x0 + page_rect.width * 0.05, max(page_rect.y0, caption.y0 - page_rect.height * 0.3), page_rect.x1 - page_rect.width * 0.05, caption.y1)
+                    else:
+                        region = fitz.Rect(page_rect.x0 + page_rect.width * 0.05, caption.y0, page_rect.x1 - page_rect.width * 0.05, min(page_rect.y1, caption.y1 + page_rect.height * 0.3))
+                    selected = []
+                    confidence = "low"
+                matches.append(
+                    {
+                        "caption": text[:160],
+                        "caption_bbox": _normalized_box(caption, page_rect),
+                        "suggested_clip": _normalized_box(region, page_rect, padding=0.02),
+                        "direction": direction,
+                        "confidence": confidence,
+                        "object_count": len(selected),
+                    }
+                )
+    except PaperLabError:
+        raise
+    except Exception as error:
+        raise PaperLabError("inspect_failed", str(error)) from error
+    return {
+        "status": "ok" if matches else "not_found",
+        "page": page_number,
+        "label": label,
+        "matches": matches,
+        "source_sha256": file_sha256(pdf),
+    }
+
+
+def render_page(pdf: Path, page_number: int, output: Path, clip_value: str | None) -> dict[str, Any]:
+    pdf = pdf.resolve()
+    output = output.resolve()
+    if not pdf.exists():
+        raise PaperLabError("pdf_not_found", str(pdf))
+    if output.suffix.lower() != ".png":
+        raise PaperLabError("invalid_output", "render output must be PNG")
+    clip = parse_clip(clip_value)
+    try:
+        import fitz
+
+        with fitz.open(pdf) as document:
+            if document.needs_pass or document.is_encrypted:
+                raise PaperLabError("encrypted_pdf", str(pdf))
+            if not 1 <= page_number <= document.page_count:
+                raise PaperLabError("invalid_page", str(page_number))
+            page = document.load_page(page_number - 1)
+            rect = page.rect
+            region = fitz.Rect(
+                rect.x0 + rect.width * clip[0],
+                rect.y0 + rect.height * clip[1],
+                rect.x0 + rect.width * clip[2],
+                rect.y0 + rect.height * clip[3],
+            )
+            content = page.get_pixmap(matrix=fitz.Matrix(2.5, 2.5), clip=region, alpha=False).tobytes("png")
+    except PaperLabError:
+        raise
+    except Exception as error:
+        raise PaperLabError("render_failed", str(error)) from error
+    try:
+        atomic_write_bytes(output, content)
+        status = "created"
+    except FileExistsError:
+        if output.read_bytes() == content:
+            status = "cached"
+        else:
+            raise PaperLabError("output_exists", str(output))
+    return {
+        "status": status,
+        "output": str(output),
+        "page": page_number,
+        "clip": clip,
+        "source_sha256": file_sha256(pdf),
+        "width": round(region.width * 2.5),
+        "height": round(region.height * 2.5),
     }
 
 
@@ -742,11 +1061,24 @@ def build_parser() -> argparse.ArgumentParser:
     sync = subparsers.add_parser("sync")
     sync.add_argument("--bibtex", type=Path, required=True)
     sync.add_argument("--index", type=Path, required=True)
+    sync.add_argument("--candidates", type=Path)
 
     read = subparsers.add_parser("read")
     read.add_argument("--pdf", type=Path, required=True)
     read.add_argument("--cache-dir", type=Path, required=True)
     read.add_argument("--pages")
+    read.add_argument("--outline", action="store_true")
+
+    render = subparsers.add_parser("render")
+    render.add_argument("--pdf", type=Path, required=True)
+    render.add_argument("--page", type=int, required=True)
+    render.add_argument("--clip")
+    render.add_argument("--output", type=Path, required=True)
+
+    inspect = subparsers.add_parser("inspect")
+    inspect.add_argument("--pdf", type=Path, required=True)
+    inspect.add_argument("--page", type=int, required=True)
+    inspect.add_argument("--label", required=True)
 
     ris = subparsers.add_parser("ris")
     ris.add_argument("--input", type=Path, required=True)
@@ -767,9 +1099,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "checkpoint":
         return checkpoint_project(args.data_root, args.project, args)
     if args.command == "sync":
-        return sync_library(args.bibtex, args.index)
+        return sync_library(args.bibtex, args.index, args.candidates)
     if args.command == "read":
-        return bounded_read(args.pdf, args.cache_dir, args.pages)
+        return read_outline(args.pdf, args.cache_dir) if args.outline else read_pages(args.pdf, args.cache_dir, args.pages)
+    if args.command == "render":
+        return render_page(args.pdf, args.page, args.output, args.clip)
+    if args.command == "inspect":
+        return inspect_page(args.pdf, args.page, args.label)
     if args.command == "ris":
         return generate_ris(args.input, split_csv(args.ids), args.output)
     if args.command == "doctor":

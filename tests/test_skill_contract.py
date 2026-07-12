@@ -12,8 +12,10 @@ def test_repository_skill_declares_natural_language_workflow_and_limits():
     assert "继续" in text
     assert "恢复项目" in text
     assert "每轮最多 15 篇" in text
-    assert "最多 8 页" in text
-    assert "20,000" in text
+    assert "read --outline" in text
+    assert "不设置固定页数或字符上限" in text
+    assert "最多 8 页" not in text
+    assert "20,000" not in text
     assert "最多 5 张证据卡" in text
     assert "当前项目：<project_id>；下一步：<action>" in text
     assert "不得读取完整 `library.bib`" in text
@@ -31,6 +33,29 @@ def test_skill_protects_human_notes_and_source_evidence():
     assert "合理推断" in text
     assert "Codex 的解释" in text
     assert "无法确认" in text
+
+
+def test_skill_defines_illustrated_narrative_notes_and_lean_handoffs():
+    text = SKILL.read_text(encoding="utf-8")
+    for requirement in [
+        "候选：<n>｜已在 Zotero：<n>｜有 PDF：<n>｜可精读：<n>｜待导入：<n>",
+        "资源管理器",
+        "每个正文明确提到的图或表",
+        "inspect --page <n> --label <label>",
+        "不要先渲染或查看整页预览",
+        "## 自动分析",
+        "### 一页读懂",
+        "### 问题与直觉",
+        "### 方法如何运作",
+        "### 结果如何解释",
+        "### 贡献、边界与下一步",
+        "证据与复现速查",
+        "只传本次新增",
+        "阶段性综合",
+    ]:
+        assert requirement in text
+    assert "检测到 References 后停止" in text
+    assert "render" in text
 
 
 def test_skill_has_desktop_metadata():
@@ -72,6 +97,9 @@ def test_readme_contains_concrete_end_to_end_steps():
         "pending_push",
     ]:
         assert instruction in text
+    assert "按章节完整读取" in text
+    assert "每个正文明确提到的图或表" in text
+    assert "每次最多读取 8 页" not in text
 
 
 def test_old_operator_facing_structure_is_removed():
