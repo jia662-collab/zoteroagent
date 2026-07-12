@@ -796,14 +796,18 @@ def read_outline(pdf: Path, cache_dir: Path) -> dict[str, Any]:
         raw_toc = []
     toc_references = next((page for _, title, page in raw_toc if REFERENCE_HEADING.fullmatch(title)), None)
     references_start = toc_references or fallback_references
-    content_end_page = (toc_references - 1) if toc_references else fallback_content_end
+    content_end_page = (
+        fallback_content_end
+        if toc_references and fallback_references == toc_references and fallback_content_end is not None
+        else (toc_references - 1 if toc_references else fallback_content_end)
+    )
     toc = [(title, page) for level, title, page in raw_toc if level == 1 and not REFERENCE_HEADING.fullmatch(title)]
     if toc:
         for index, (title, start_page) in enumerate(toc):
             next_start = toc[index + 1][1] if index + 1 < len(toc) else extracted["page_count"] + 1
-            end_page = next_start - 1
+            end_page = max(start_page, next_start - 1)
             if references_start and start_page <= references_start < next_start and content_end_page is not None:
-                end_page = min(end_page, content_end_page)
+                end_page = max(start_page, min(end_page, content_end_page))
             sections.append({"title": title, "start_page": start_page, "end_page": end_page, "source": "toc"})
     else:
         sections, references_start = _heuristic_outline(extracted["pages"])
