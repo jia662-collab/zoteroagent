@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import html
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -439,6 +441,16 @@ def doctor(data_root: Path, bibtex: Path) -> dict[str, Any]:
         pypdf_ready = True
     except Exception:
         pypdf_ready = False
+    try:
+        import markdown  # noqa: F401
+
+        markdown_ready = True
+    except Exception:
+        markdown_ready = False
+    try:
+        browser = str(find_chromium())
+    except PaperLabError:
+        browser = ""
     bibtex_entries = 0
     bibtex_ok = False
     if bibtex.exists():
@@ -451,9 +463,12 @@ def doctor(data_root: Path, bibtex: Path) -> dict[str, Any]:
         "bibtex_entries": bibtex_entries,
         "pymupdf": pymupdf,
         "pypdf": pypdf_ready,
+        "markdown": markdown_ready,
+        "pdf_browser": browser,
         "git": run_git(data_root.resolve(), "--version", check=False).returncode == 0,
     }
-    return {"ready": all(checks[key] for key in ("private_git_repo", "bibtex", "pymupdf", "pypdf", "git")), "checks": checks}
+    required = ("private_git_repo", "bibtex", "pymupdf", "pypdf", "markdown", "pdf_browser", "git")
+    return {"ready": all(checks[key] for key in required), "checks": checks}
 
 
 def _find_matching_delimiter(text: str, start: int, opener: str, closer: str) -> int:
@@ -981,6 +996,197 @@ def render_page(pdf: Path, page_number: int, output: Path, clip_value: str | Non
     }
 
 
+PDF_CSS = """
+@page { size: A4; margin: 17mm 18mm 18mm; }
+html { color: #171717; background: white; }
+body {
+  font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.78;
+  max-width: 100%;
+  margin: 0;
+  letter-spacing: 0;
+}
+h1, h2, h3, h4 { color: #111; line-height: 1.35; break-after: avoid; }
+h1 { font-size: 23pt; margin: 0 0 10mm; }
+h2 { font-size: 16pt; margin: 9mm 0 3mm; border-bottom: 1px solid #bdbdbd; padding-bottom: 2mm; }
+h3 { font-size: 12.5pt; margin: 6mm 0 2mm; }
+p { margin: 0 0 3.2mm; orphans: 3; widows: 3; text-align: justify; }
+blockquote { margin: 0 0 5mm; padding: 3mm 4mm; border-left: 3px solid #555; background: #f4f4f4; }
+blockquote p { margin: 0; }
+img { display: block; max-width: 100%; max-height: 220mm; margin: 5mm auto 2mm; object-fit: contain; break-inside: avoid; }
+table { width: 100%; border-collapse: collapse; margin: 4mm 0; font-size: 9pt; break-inside: avoid; }
+th, td { border: 1px solid #999; padding: 2mm; vertical-align: top; }
+th { background: #ededed; }
+pre, code { font-family: Consolas, "Cascadia Mono", monospace; }
+pre { white-space: pre-wrap; padding: 3mm; background: #f3f3f3; break-inside: avoid; }
+a { color: #1d4e89; text-decoration: none; }
+hr { border: 0; border-top: 1px solid #aaa; margin: 7mm 0; }
+details { display: block; margin: 4mm 0; }
+details > * { display: block !important; }
+summary { font-weight: 700; margin-bottom: 2mm; }
+.source-anchor { color: #555; font-size: 9pt; border-left: 2px solid #777; padding-left: 3mm; }
+.translation-note { background: #fff8db; padding: 3mm; border: 1px solid #d8c46a; }
+"""
+
+
+def find_chromium(explicit: Path | None = None) -> Path:
+    if explicit:
+        candidate = explicit.expanduser().resolve()
+        if candidate.is_file():
+            return candidate
+        raise PaperLabError("browser_not_found", str(candidate))
+
+    for executable in ("msedge", "msedge.exe", "chrome", "chrome.exe", "chromium", "chromium.exe"):
+        located = shutil.which(executable)
+        if located:
+            return Path(located).resolve()
+
+    roots = [
+        os.environ.get("PROGRAMFILES(X86)"),
+        os.environ.get("PROGRAMFILES"),
+        os.environ.get("LOCALAPPDATA"),
+    ]
+    relatives = [
+        Path("Microsoft/Edge/Application/msedge.exe"),
+        Path("Google/Chrome/Application/chrome.exe"),
+        Path("Chromium/Application/chrome.exe"),
+    ]
+    for root in roots:
+        if not root:
+            continue
+        for relative in relatives:
+            candidate = Path(root) / relative
+            if candidate.is_file():
+                return candidate.resolve()
+    raise PaperLabError("browser_not_found", "Microsoft Edge, Chrome, or Chromium is required for PDF export")
+
+
+def validate_manuscript(text: str, kind: str) -> None:
+    if kind == "translation":
+        if "机器辅助翻译，原文为准" not in text or "原文 PDF 第" not in text:
+            raise PaperLabError(
+                "invalid_translation",
+                "the Chinese companion requires the translation disclaimer and original PDF page anchors",
+            )
+        return
+
+    legacy_titles = (
+        "一页读懂",
+        "问题与直觉",
+        "方法如何运作",
+        "结果如何解释",
+        "贡献、边界与下一步",
+    )
+    if all(re.search(rf"^#{{2,4}}\s+{re.escape(title)}\s*$", text, flags=re.M) for title in legacy_titles):
+        raise PaperLabError(
+            "legacy_reading_structure",
+            "the learning manuscript must follow the paper's argument order instead of the legacy cross-cut template",
+        )
+
+
+def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
+    try:
+        import markdown
+    except ImportError as error:
+        raise PaperLabError("markdown_unavailable", "install the Markdown package") from error
+
+    text = source.read_text(encoding="utf-8") if text is None else text
+    title_match = re.search(r"^#\s+(.+)$", text, flags=re.M)
+    title = title_match.group(1).strip() if title_match else source.stem
+    body = markdown.markdown(text, extensions=["tables", "fenced_code", "md_in_html", "sane_lists"])
+    body = re.sub(r"<details(?![^>]*\bopen\b)", "<details open", body)
+    kind_class = "translation" if kind == "translation" else "learning"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<base href="{html.escape(source.parent.resolve().as_uri())}/">
+<meta name="paperlab-kind" content="{kind_class}">
+<title>{html.escape(title)}</title>
+<style>{PDF_CSS}</style>
+</head>
+<body class="{kind_class}">{body}</body>
+</html>
+"""
+
+
+def export_markdown_pdf(
+    source: Path,
+    output: Path,
+    kind: str,
+    replace: bool = False,
+    browser: Path | None = None,
+) -> dict[str, Any]:
+    source = source.expanduser().resolve()
+    output = output.expanduser().resolve()
+    if not source.is_file():
+        raise PaperLabError("input_not_found", str(source))
+    if source.suffix.lower() != ".md":
+        raise PaperLabError("invalid_input", "export input must be Markdown")
+    if output.suffix.lower() != ".pdf":
+        raise PaperLabError("invalid_output", "export output must be PDF")
+    existed = output.exists()
+    if existed and not replace:
+        raise PaperLabError("output_exists", str(output))
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    manuscript = source.read_text(encoding="utf-8")
+    validate_manuscript(manuscript, kind)
+    browser_path = find_chromium(browser)
+    rendered_html = markdown_document(source, kind, manuscript)
+    with tempfile.TemporaryDirectory(prefix=".paperlab-export-", dir=output.parent) as temporary:
+        temp_dir = Path(temporary)
+        html_path = temp_dir / "document.html"
+        pdf_path = temp_dir / "document.pdf"
+        profile = temp_dir / "browser-profile"
+        html_path.write_text(rendered_html, encoding="utf-8", newline="\n")
+        command = [
+            str(browser_path),
+            "--headless",
+            "--disable-gpu",
+            "--disable-extensions",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--allow-file-access-from-files",
+            "--no-pdf-header-footer",
+            f"--user-data-dir={profile}",
+            f"--print-to-pdf={pdf_path}",
+            html_path.as_uri(),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        if completed.returncode != 0 or not pdf_path.is_file():
+            message = (completed.stderr or completed.stdout or "browser did not create a PDF").strip()
+            raise PaperLabError("export_failed", message[-1000:])
+        try:
+            import fitz
+
+            with fitz.open(pdf_path) as document:
+                if document.page_count < 1:
+                    raise PaperLabError("export_failed", "browser created an empty PDF")
+                page_count = document.page_count
+        except PaperLabError:
+            raise
+        except Exception as error:
+            raise PaperLabError("export_failed", str(error)) from error
+        if replace:
+            os.replace(pdf_path, output)
+        else:
+            try:
+                os.link(pdf_path, output)
+            except FileExistsError as error:
+                raise PaperLabError("output_exists", str(output)) from error
+
+    return {
+        "status": "replaced" if existed else "created",
+        "kind": kind,
+        "input": str(source),
+        "output": str(output),
+        "pages": page_count,
+        "source_sha256": file_sha256(source),
+    }
+
+
 def ris_type(record: dict[str, Any]) -> str:
     kind = str(record.get("type") or record.get("entry_type") or "").lower()
     if "conference" in kind or "inproceedings" in kind:
@@ -1084,6 +1290,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--page", type=int, required=True)
     inspect.add_argument("--label", required=True)
 
+    export = subparsers.add_parser("export")
+    export.add_argument("--input", type=Path, required=True)
+    export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--kind", choices=("translation", "learning"), required=True)
+    export.add_argument("--replace", action="store_true")
+    export.add_argument("--browser", type=Path)
+
     ris = subparsers.add_parser("ris")
     ris.add_argument("--input", type=Path, required=True)
     ris.add_argument("--ids", required=True)
@@ -1110,6 +1323,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return render_page(args.pdf, args.page, args.output, args.clip)
     if args.command == "inspect":
         return inspect_page(args.pdf, args.page, args.label)
+    if args.command == "export":
+        return export_markdown_pdf(args.input, args.output, args.kind, args.replace, args.browser)
     if args.command == "ris":
         return generate_ris(args.input, split_csv(args.ids), args.output)
     if args.command == "doctor":

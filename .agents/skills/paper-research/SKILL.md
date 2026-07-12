@@ -58,60 +58,31 @@ Use `<repo>/research` as the private data repository and `<repo>/.paperlab/paper
 4. Screen from metadata or abstract only when full text is unavailable and label that evidence basis.
 5. Save decisions and unresolved checks in `screening.md`. Never treat an abstract as full-text evidence.
 
-## Read and illustrate
+## Read, translate, learn, and export
 
-1. Resolve the PDF from the local index; never edit, rename, copy, or delete the source PDF.
+Read [references/deep-reading.md](references/deep-reading.md) before any full-text reading or multi-paper batch. It is the fixed reading method and artifact contract.
+
+1. Resolve the PDF from the local index; never edit, rename, copy, or delete the source PDF. Record its SHA-256 before reading.
 2. Run `read --outline`, then read each relevant natural section once. If a section is too large for the platform, divide it by its own subsections or page boundary without introducing a fixed numeric cap or omitting pages.
-3. Stop normal reading at the detected reference boundary. Save progress after each completed section and checkpoint after each completed paper.
-4. Record page, section, figure, or table references for important claims.
-5. Report encrypted, corrupt, or scanned PDFs. Do not run OCR without explicit approval.
-6. For every figure or table used in the explanation, call `inspect --page <n> --label <label>` first. It returns caption and vector/image-based `suggested_clip` as compact JSON without sending a page image into context.
-7. When `inspect` returns one high-confidence match, call `render` once with that crop and visually inspect only the final PNG. Include axes, legends, subfigure labels, and caption. 不要先渲染或查看整页预览.
-8. If the match is missing, ambiguous, low-confidence, or the final crop is incomplete, render one low-detail full-page fallback, adjust once, then keep only the final crop. Reuse an existing asset without rendering when its manifest source hash still matches.
-9. Save local PNGs under `projects/<id>/assets/<citation_key>/`. 每个正文明确提到的图或表 must appear immediately beside its explanation in Markdown.
-10. Keep a hidden `PAPERLAB:FIGURES` JSON comment in the AUTO block with source hash, page, clip, and relative asset path so missing local assets can be regenerated.
-11. In the completion response, display only the most important one or two images inline and link the full note.
+3. Stop normal reading at the detected reference boundary. Read relevant appendices; use references only for citation verification.
+4. Produce two distinct manuscripts from the same extraction cache:
+   - `translations/<citation_key>.md`: 中文全文对照版，按原论文的章节与页码对齐，不得压缩成摘要。
+   - `papers/<citation_key>.md`: 精读学习版，沿作者的论证顺序逐节解释，不得用“问题、方法、结果、贡献”重新横向切块。
+5. Record page, section, figure, table, or equation references beside the claim they support. Keep the separate evidence card for later comparison.
+6. Report encrypted, corrupt, or scanned PDFs. Do not run OCR without explicit approval.
+7. For each used figure or table, call `inspect --page <n> --label <label>` first. Render and visually inspect only the final crop; use one low-detail full-page fallback only when matching is uncertain or incomplete.
+8. Save local PNGs under `projects/<id>/assets/<citation_key>/`; place each used image beside the paragraph that teaches it. Reuse assets whose source hash still matches.
+9. Keep hidden `PAPERLAB:FIGURES` JSON in the AUTO block. When refreshing, replace only `PAPERLAB:AUTO`; preserve `## 人工确认` and all user text byte-for-byte.
+10. Export both manuscripts with the engine `export` command to `output/pdf/<project_id>/`. Use `<short_title>_中文全文对照.pdf` and `<short_title>_精读学习.pdf`; do not replace an existing PDF unless the revised manuscript has been validated and `--replace` is explicit.
+11. The Chinese companion must say `机器辅助翻译，原文为准`. The learning PDF must contain a progressive reading route, section transitions, the complete argument chain, limitations, and next reading.
+12. In the completion response, display only the most useful one or two figures and provide absolute links to both PDFs.
 
-Use this narrative note shape. Adapt the explanation to the paper instead of filling a rigid checklist.
+Keep this update boundary in both manuscripts:
 
 ```markdown
-# Paper title
-
-> Authors｜Year｜Venue｜DOI｜Full-text evidence scope
-
 <!-- PAPERLAB:AUTO:START -->
 
-## 自动分析
-
-### 一页读懂
-
-Three to five connected paragraphs explaining the problem, approach, result, and significance.
-
-### 问题与直觉
-
-Explain why the problem matters, what prior approaches missed, and the concepts needed to follow the paper.
-
-### 方法如何运作
-
-Explain the data flow and causal logic. Place each cited figure beside its explanation and add a short 看图要点.
-
-### 结果如何解释
-
-Explain the core experiments with conditions, samples, units, pages, and figure or table numbers.
-
-### 贡献、边界与下一步
-
-Separate what is demonstrated, what is inferred, what remains uncertain, and what paper should be read next.
-
-<details>
-<summary>证据与复现速查</summary>
-
-| 结论 | 证据类型 | 页码/图表 | 条件 |
-|---|---|---|---|
-
-Include parameters, reproduction requirements, and unresolved checks. Use 作者明确陈述、数据直接支持、合理推断、Codex 的解释、无法确认 as evidence types.
-
-</details>
+Automatically generated translation or learning narrative.
 
 <!-- PAPERLAB:AUTO:END -->
 
@@ -120,7 +91,18 @@ Include parameters, reproduction requirements, and unresolved checks. Use 作者
 User-maintained content. Codex不得覆盖 this section.
 ```
 
-When refreshing a note, replace only the AUTO block. Preserve everything else byte-for-byte. Write connected prose by default; use bullets only for parameters, procedures, or short limitations.
+## Parallel deep reading
+
+For two or more requested papers, use 每篇论文一个子代理 when subagents are available.
+
+1. The 协调代理 resolves citation keys, source paths, hashes, project questions, and unique output paths before delegation.
+2. Give each subagent exactly one paper and the fixed method in `references/deep-reading.md`. The subagent may write only its own translation, learning note, evidence card, and asset directory.
+3. 只有协调代理可以更新 `PROJECT.md`, `STATUS.md`, `state/<project_id>.json`, events, `synthesis.md`, or Git. Subagents never checkpoint, commit, push, or edit another paper.
+4. Start as many papers as the user requested up to available slots. When slots are fewer than papers, 分波次 without reducing the requested set.
+5. 一个论文失败不得取消其他论文. Preserve successful artifacts and retry only failed or incomplete papers.
+6. As results arrive, the coordinator validates source coverage, page anchors, images, human-section preservation, and source PDF hash. Then it updates state sequentially.
+7. Perform one private backup after the validated batch. Report completed, failed, pending-retry, and next-wave counts.
+8. If subagents are unavailable, run the identical per-paper contract sequentially rather than silently weakening the outputs.
 
 ## Synthesize
 
