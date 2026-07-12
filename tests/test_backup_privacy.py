@@ -292,6 +292,8 @@ def test_doctor_reports_local_readiness(tmp_path: Path):
     assert result["checks"]["bibtex_entries"] == 1
     assert result["checks"]["pymupdf"] is True
     assert result["checks"]["pypdf"] is True
+    assert result["checks"]["markdown"] is True
+    assert Path(result["checks"]["pdf_browser"]).name.lower() in {"msedge.exe", "chrome.exe", "chromium.exe"}
 
 
 def test_encrypted_pdf_is_reported_without_text(tmp_path: Path):
