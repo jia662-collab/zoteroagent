@@ -5,3 +5,11 @@ __pycache__/
 node_modules/
 dist/
 build/
+logs/*.log
+cache/text/*.json
+cache/text/*.md
+cache/downloads/
+research/
+bibliography/library.bib
+.paperlab/cache/
+*.pdf
