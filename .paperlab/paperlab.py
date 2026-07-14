@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import hashlib
+import io
 import json
 import os
 import re
@@ -1015,6 +1017,10 @@ p { margin: 0 0 3.2mm; orphans: 3; widows: 3; text-align: justify; }
 blockquote { margin: 0 0 5mm; padding: 3mm 4mm; border-left: 3px solid #555; background: #f4f4f4; }
 blockquote p { margin: 0; }
 img { display: block; max-width: 100%; max-height: 220mm; margin: 5mm auto 2mm; object-fit: contain; break-inside: avoid; }
+img.math-inline { display: inline-block; max-width: 100%; max-height: none; margin: 0 0.08em; vertical-align: -0.25em; }
+.math-block { display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; margin: 4mm 0; break-inside: avoid; }
+.math-block img { grid-column: 2; display: block; max-width: 100%; max-height: 65mm; margin: 0; }
+.math-number { grid-column: 3; justify-self: end; margin-left: 4mm; white-space: nowrap; }
 table { width: 100%; border-collapse: collapse; margin: 4mm 0; font-size: 9pt; break-inside: avoid; }
 th, td { border: 1px solid #999; padding: 2mm; vertical-align: top; }
 th { background: #ededed; }
@@ -1085,6 +1091,117 @@ def validate_manuscript(text: str, kind: str) -> None:
         )
 
 
+def _normalize_math(expression: str) -> tuple[str, str | None]:
+    tag_match = re.search(r"\\tag\{([^{}]*)\}", expression)
+    tag = tag_match.group(1).strip() if tag_match else None
+    expression = re.sub(r"\\tag\{[^{}]*\}", "", expression)
+    expression = re.sub(r"\\frac(?!\{)([0-9A-Za-z])([0-9A-Za-z])", r"\\frac{\1}{\2}", expression)
+    expression = re.sub(r"\\frac(\{[^{}]*\})([0-9A-Za-z])", r"\\frac\1{\2}", expression)
+    expression = re.sub(r"\\frac(?!\{)([0-9A-Za-z])(\{[^{}]*\})", r"\\frac{\1}\2", expression)
+    expression = re.sub(r"\\ge(?![A-Za-z])", r"\\geq", expression)
+    expression = expression.replace(r"\middle", "")
+
+    def replace_cases(match: re.Match[str]) -> str:
+        rows = []
+        for row in re.split(r"\\\\", match.group(1)):
+            row = row.strip().rstrip(",")
+            if row:
+                rows.append(row.replace("&", r"\quad "))
+        return r"\left\{\substack{" + r" \\ ".join(rows) + r"}\right."
+
+    expression = re.sub(
+        r"\\begin\{cases\}(.*?)\\end\{cases\}",
+        replace_cases,
+        expression,
+        flags=re.S,
+    )
+    return re.sub(r"\s+", " ", expression).strip(), tag
+
+
+def _prepare_math(text: str) -> tuple[str, dict[str, str]]:
+    try:
+        from matplotlib import rc_context
+        from matplotlib.font_manager import FontProperties
+        from matplotlib.mathtext import math_to_image
+    except ImportError as error:
+        raise PaperLabError("math_renderer_unavailable", "install matplotlib for PDF math rendering") from error
+
+    code_fragments: dict[str, str] = {}
+    math_fragments: dict[str, str] = {}
+    svg_cache: dict[tuple[str, bool], str] = {}
+
+    def mask_code(match: re.Match[str]) -> str:
+        token = f"PAPERLABCODE{len(code_fragments):06d}TOKEN"
+        code_fragments[token] = match.group(0)
+        return token
+
+    text = re.sub(
+        r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$",
+        mask_code,
+        text,
+    )
+    text = re.sub(r"(?s)(?P<ticks>`+).+?(?P=ticks)", mask_code, text)
+
+    settings = {
+        "mathtext.fontset": "custom",
+        "mathtext.rm": "Microsoft YaHei",
+        "mathtext.it": "STIXGeneral:italic",
+        "mathtext.bf": "STIXGeneral:bold",
+        "mathtext.fallback": "stix",
+        "svg.fonttype": "path",
+    }
+
+    def render(expression: str, display: bool) -> tuple[str, str | None]:
+        normalized, tag = _normalize_math(expression)
+        key = (normalized, display)
+        if key not in svg_cache:
+            content = io.BytesIO()
+            try:
+                with rc_context(settings):
+                    math_to_image(
+                        f"${normalized}$",
+                        content,
+                        prop=FontProperties(size=12 if display else 10.5),
+                        dpi=144,
+                        format="svg",
+                        color="#171717",
+                    )
+            except Exception as error:
+                raise PaperLabError("math_render_failed", f"{normalized}: {error}") from error
+            svg_cache[key] = base64.b64encode(content.getvalue()).decode("ascii")
+        alt = html.escape(re.sub(r"\s+", " ", expression).strip(), quote=True)
+        image_class = "math-block-image" if display else "math-inline"
+        image = (
+            f'<img class="{image_class}" alt="{alt}" '
+            f'src="data:image/svg+xml;base64,{svg_cache[key]}">'
+        )
+        return image, tag
+
+    def replace_block(match: re.Match[str]) -> str:
+        token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
+        image, tag = render(match.group(1), True)
+        number = f'<span class="math-number">({html.escape(tag)})</span>' if tag else ""
+        math_fragments[token] = image + number
+        return f'\n<div class="math-block">{token}</div>\n'
+
+    for pattern in (
+        r"(?ms)^[ \t]*\$\$[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?[ \t]*\$\$[ \t]*$",
+        r"(?ms)^[ \t]*\\\[[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?[ \t]*\\\][ \t]*$",
+    ):
+        text = re.sub(pattern, replace_block, text)
+
+    def replace_inline(match: re.Match[str]) -> str:
+        token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
+        math_fragments[token] = render(match.group(1), False)[0]
+        return token
+
+    text = re.sub(r"(?<!\\)\$(?!\$)([^\n$]+?)(?<!\\)\$(?!\$)", replace_inline, text)
+    text = re.sub(r"\\\(([^\n]+?)\\\)", replace_inline, text)
+    for token, code in code_fragments.items():
+        text = text.replace(token, code)
+    return text, math_fragments
+
+
 def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
     try:
         import markdown
@@ -1094,7 +1211,10 @@ def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
     text = source.read_text(encoding="utf-8") if text is None else text
     title_match = re.search(r"^#\s+(.+)$", text, flags=re.M)
     title = title_match.group(1).strip() if title_match else source.stem
+    text, math_fragments = _prepare_math(text)
     body = markdown.markdown(text, extensions=["tables", "fenced_code", "md_in_html", "sane_lists"])
+    for token, fragment in math_fragments.items():
+        body = body.replace(token, fragment)
     body = re.sub(r"<details(?![^>]*\bopen\b)", "<details open", body)
     kind_class = "translation" if kind == "translation" else "learning"
     return f"""<!doctype html>
@@ -1109,6 +1229,36 @@ def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
 <body class="{kind_class}">{body}</body>
 </html>
 """
+
+
+def validate_exported_pdf(pdf: Path) -> int:
+    try:
+        import fitz
+
+        with fitz.open(pdf) as document:
+            if document.page_count < 1:
+                raise PaperLabError("export_validation_failed", "browser created an empty PDF")
+            for number, page in enumerate(document, 1):
+                text = page.get_text()
+                raw_math = [
+                    marker
+                    for marker in (r"\frac", r"\sum", r"\tag", r"\begin{", "$$", r"\left", r"\right")
+                    if marker in text
+                ]
+                if raw_math:
+                    raise PaperLabError(
+                        "export_validation_failed",
+                        f"page {number} contains raw math source: {', '.join(raw_math)}",
+                    )
+                if "\ufffd" in text:
+                    raise PaperLabError("export_validation_failed", f"page {number} contains replacement characters")
+                if not text.strip() and not page.get_images(full=True) and not page.get_drawings():
+                    raise PaperLabError("export_validation_failed", f"page {number} is blank")
+            return document.page_count
+    except PaperLabError:
+        raise
+    except Exception as error:
+        raise PaperLabError("export_validation_failed", str(error)) from error
 
 
 def export_markdown_pdf(
@@ -1158,17 +1308,7 @@ def export_markdown_pdf(
         if completed.returncode != 0 or not pdf_path.is_file():
             message = (completed.stderr or completed.stdout or "browser did not create a PDF").strip()
             raise PaperLabError("export_failed", message[-1000:])
-        try:
-            import fitz
-
-            with fitz.open(pdf_path) as document:
-                if document.page_count < 1:
-                    raise PaperLabError("export_failed", "browser created an empty PDF")
-                page_count = document.page_count
-        except PaperLabError:
-            raise
-        except Exception as error:
-            raise PaperLabError("export_failed", str(error)) from error
+        page_count = validate_exported_pdf(pdf_path)
         if replace:
             os.replace(pdf_path, output)
         else:

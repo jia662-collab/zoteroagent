@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
 
 import fitz
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +82,55 @@ def test_export_creates_chinese_pdf_with_source_anchors_and_image(tmp_path: Path
     assert "hidden workflow metadata" not in text
     assert images >= 1
     assert sha256(source) == before
+
+
+def test_export_renders_latex_math_instead_of_printing_source_markers(tmp_path: Path):
+    source = tmp_path / "math.md"
+    source.write_text(
+        r"""# 精读学习版
+
+行内公式 $a_i=x_i^2$ 应正常排版。
+
+$$
+L=\frac{1}{N}\sum_{i=1}^{N}x_i. \tag{1}
+$$
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "math.pdf"
+
+    run_engine(
+        "export",
+        "--input",
+        source,
+        "--output",
+        output,
+        "--kind",
+        "learning",
+    )
+
+    with fitz.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+
+    assert "应正常排版" in text
+    assert "\\frac" not in text
+    assert "\\sum" not in text
+    assert "$$" not in text
+    assert "(1)" in text
+
+
+def test_pdf_validation_rejects_raw_latex_source(tmp_path: Path):
+    pdf = tmp_path / "broken.pdf"
+    document = fitz.open()
+    document.new_page().insert_text((72, 72), r"L=\frac{1}{N}")
+    document.save(pdf)
+    document.close()
+    engine = runpy.run_path(str(ENGINE))
+
+    with pytest.raises(engine["PaperLabError"]) as error:
+        engine["validate_exported_pdf"](pdf)
+
+    assert error.value.code == "export_validation_failed"
 
 
 def test_export_refuses_to_overwrite_without_explicit_replace(tmp_path: Path):

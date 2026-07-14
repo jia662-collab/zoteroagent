@@ -73,7 +73,7 @@ Read [references/deep-reading.md](references/deep-reading.md) before any full-te
 7. For each used figure or table, call `inspect --page <n> --label <label>` first. Render and visually inspect only the final crop; use one low-detail full-page fallback only when matching is uncertain or incomplete.
 8. Save local PNGs under `projects/<id>/assets/<citation_key>/`; place each used image beside the paragraph that teaches it. Reuse assets whose source hash still matches.
 9. Keep hidden `PAPERLAB:FIGURES` JSON in the AUTO block. When refreshing, replace only `PAPERLAB:AUTO`; preserve `## 人工确认` and all user text byte-for-byte.
-10. Export both manuscripts with the engine `export` command to `output/pdf/<project_id>/`. Use `<short_title>_中文全文对照.pdf` and `<short_title>_精读学习.pdf`; do not replace an existing PDF unless the revised manuscript has been validated and `--replace` is explicit.
+10. Export both manuscripts with the engine `export` command to `output/pdf/<project_id>/`. Use `<short_title>_中文全文对照.pdf` and `<short_title>_精读学习.pdf`; do not replace an existing PDF unless the revised manuscript has been validated and `--replace` is explicit. The engine's automatic PDF validation must pass before replacement or checkpoint; on failure, preserve the existing PDF and report the validation error.
 11. The Chinese companion must say `机器辅助翻译，原文为准`. The learning PDF must contain a progressive reading route, section transitions, the complete argument chain, limitations, and next reading.
 12. In the completion response, display only the most useful one or two figures and provide absolute links to both PDFs.
 
