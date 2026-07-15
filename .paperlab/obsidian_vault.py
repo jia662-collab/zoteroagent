@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from datetime import datetime
@@ -12,6 +13,8 @@ from typing import Any
 
 
 SUBJECT = "10_深度学习与CNN"
+HOME_CANVAS = "00_首页/00_从这里开始.canvas"
+PAPER_DIR = f"{SUBJECT}/07_论文与证据"
 
 KNOWLEDGE_MODULES = {
     "01_数学与计算基础": [
@@ -39,7 +42,7 @@ KNOWLEDGE_MODULES = {
         ("通道与特征层级", "理解浅层纹理、深层语义以及通道混合。"),
         ("1x1分组与深度可分离卷积", "理解 1x1、group、depthwise separable convolution 的结构和效率。"),
     ],
-    "04_其他网络架构": [
+    "04_经典与现代架构": [
         ("LeNet-5", "理解早期 CNN 的卷积、下采样和分类器组合。"),
         ("AlexNet", "理解 ReLU、Dropout、数据增强和 GPU 训练带来的突破。"),
         ("VGG", "理解重复小卷积核和加深网络的统一设计。"),
@@ -73,23 +76,29 @@ KNOWLEDGE_MODULES = {
     ],
 }
 
+LEGACY_MODULES = {"04_经典与现代架构": "04_其他网络架构"}
+
 PAPER_WRAPPERS = {
-    "论文-LeNet": {
+    "01_LeNet": {
+        "legacy": "论文-LeNet",
         "reading": "99_自动导入/精读稿/lecunGradientbasedLearningApplied1998",
         "translation": "99_自动导入/中文全文对照稿/lecunGradientbasedLearningApplied1998",
         "pdfs": ["LeNet_精读学习.pdf", "LeNet_中文全文对照.pdf"],
     },
-    "论文-AlexNet": {
+    "02_AlexNet": {
+        "legacy": "论文-AlexNet",
         "reading": "99_自动导入/精读稿/krizhevskyImageNetClassificationDeep2012",
         "translation": "99_自动导入/中文全文对照稿/krizhevskyImageNetClassificationDeep2012",
         "pdfs": ["AlexNet_精读学习.pdf", "AlexNet_中文全文对照.pdf"],
     },
-    "论文-VGG": {
+    "03_VGG": {
+        "legacy": "论文-VGG",
         "reading": "99_自动导入/精读稿/karensimonyanVeryDeepConvolutional2015",
         "translation": "99_自动导入/中文全文对照稿/karensimonyanVeryDeepConvolutional2015",
         "pdfs": ["VGG_精读学习.pdf", "VGG_中文全文对照.pdf"],
     },
-    "论文-CNN综述": {
+    "04_CNN综述": {
+        "legacy": "论文-CNN综述",
         "reading": "99_自动导入/精读稿/guRecentAdvancesConvolutional2018",
         "translation": "99_自动导入/中文全文对照稿/guRecentAdvancesConvolutional2018",
         "pdfs": ["CNN综述_精读学习.pdf", "CNN综述_中文全文对照.pdf"],
@@ -97,10 +106,10 @@ PAPER_WRAPPERS = {
 }
 
 PAPER_BY_CONCEPT = {
-    "LeNet-5": "论文-LeNet",
-    "AlexNet": "论文-AlexNet",
-    "VGG": "论文-VGG",
-    "卷积运算": "论文-CNN综述",
+    "LeNet-5": "01_LeNet",
+    "AlexNet": "02_AlexNet",
+    "VGG": "03_VGG",
+    "卷积运算": "04_CNN综述",
 }
 
 CATEGORIES = (
@@ -109,6 +118,20 @@ CATEGORIES = (
     ("证据卡", "evidence", "*.json"),
     ("PDF", None, "*.pdf"),
 )
+
+GRAPH_SETTINGS = {
+    "search": "tag:#knowledge",
+    "showTags": True,
+    "showAttachments": False,
+    "hideUnresolved": True,
+    "showOrphans": False,
+    "showArrow": True,
+    "colorGroups": [
+        {"query": "tag:#knowledge/module", "color": {"a": 1, "rgb": 3107738}},
+        {"query": "tag:#knowledge/concept", "color": {"a": 1, "rgb": 3050327}},
+        {"query": "tag:#knowledge/paper", "color": {"a": 1, "rgb": 8015531}},
+    ],
+}
 
 
 def write_if_missing(path: Path, text: str) -> bool:
@@ -161,7 +184,14 @@ def canvas_id(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:12]
 
 
-def file_node(path: str, x: int, y: int, width: int = 320, height: int = 180, color: str | None = None) -> dict[str, Any]:
+def file_node(
+    path: str,
+    x: int,
+    y: int,
+    width: int = 340,
+    height: int = 170,
+    color: str | None = None,
+) -> dict[str, Any]:
     node: dict[str, Any] = {
         "id": canvas_id(path),
         "type": "file",
@@ -170,6 +200,21 @@ def file_node(path: str, x: int, y: int, width: int = 320, height: int = 180, co
         "width": width,
         "height": height,
         "file": path,
+    }
+    if color:
+        node["color"] = color
+    return node
+
+
+def text_node(text: str, x: int, y: int, width: int, height: int, color: str | None = None) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "id": canvas_id(f"text:{text}"),
+        "type": "text",
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "text": text,
     }
     if color:
         node["color"] = color
@@ -188,42 +233,96 @@ def group_node(label: str, x: int, y: int, width: int, height: int) -> dict[str,
     }
 
 
-def edge(from_id: str, to_id: str, label: str) -> dict[str, Any]:
-    return {
+def edge(from_id: str, to_id: str, label: str = "") -> dict[str, Any]:
+    result = {
         "id": f"edge-{canvas_id(f'{from_id}|{to_id}|{label}')}",
         "fromNode": from_id,
         "fromSide": "right",
         "toNode": to_id,
         "toSide": "left",
         "toEnd": "arrow",
-        "label": label,
     }
+    if label:
+        result["label"] = label
+    return result
 
 
 def json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 
 
-def concept_markdown(module: str, title: str, summary: str) -> str:
-    module_link = f"{SUBJECT}/{module}/模块总览"
+def module_guide_path(module: str) -> str:
+    return f"{SUBJECT}/{module}/00_{module[3:]}-导览.md"
+
+
+def module_canvas_path(module: str) -> str:
+    return f"{SUBJECT}/{module}/00_{module[3:]}.canvas"
+
+
+def concept_path(module: str, index: int, title: str) -> str:
+    return f"{SUBJECT}/{module}/{index:02d}_{title}.md"
+
+
+def navigation_block(module: str, index: int, concepts: list[tuple[str, str]]) -> str:
+    title = concepts[index - 1][0]
+    previous = (
+        f"[[{concept_path(module, index - 1, concepts[index - 2][0])[:-3]}]]"
+        if index > 1
+        else "无（本模块起点）"
+    )
+    following = (
+        f"[[{concept_path(module, index + 1, concepts[index][0])[:-3]}]]"
+        if index < len(concepts)
+        else "无（本模块终点）"
+    )
+    return f"""<!-- knowledge-nav:start -->
+路径：[[{module_guide_path(module)[:-3]}]] → {index:02d} {title}
+
+上一节：{previous}<br>
+下一节：{following}<br>
+标签：#knowledge #knowledge/concept
+<!-- knowledge-nav:end -->"""
+
+
+def concept_markdown(module: str, index: int, concepts: list[tuple[str, str]]) -> str:
+    title, summary = concepts[index - 1]
     evidence = ""
     if title in PAPER_BY_CONCEPT:
-        evidence = f"- 证据支持：[[{SUBJECT}/90_论文证据/{PAPER_BY_CONCEPT[title]}]]\n"
+        evidence = f"- 证据支持：[[{PAPER_DIR}/{PAPER_BY_CONCEPT[title]}]]\n"
     return f'''---
 type: concept
 status: 未学
-module: "[[{module_link}]]"
+module: "[[{module_guide_path(module)[:-3]}]]"
+order: {index}
 ---
 
-# {title}
+# {index:02d} {title}
+
+{navigation_block(module, index, concepts)}
 
 ## 一句话理解
 
 {summary}
 
-## 知识网络关系
+## 为什么重要
 
-- 属于：[[{module_link}]]
+说明这个概念解决的问题，以及它在后续网络中的作用。
+
+## 核心机制
+
+用公式、数据形状或计算流程解释其工作方式。
+
+## 最小例子
+
+补充一个可以手算或运行的最小例子。
+
+## 常见误区
+
+记录最容易混淆的概念和适用边界。
+
+## 与其他概念的关系
+
+- 属于：[[{module_guide_path(module)[:-3]}]]
 {evidence}
 ## 学习检查
 
@@ -234,20 +333,54 @@ module: "[[{module_link}]]"
 
 
 def module_markdown(module: str, concepts: list[tuple[str, str]]) -> str:
-    links = "\n".join(f"- [[{SUBJECT}/{module}/{title}]]" for title, _ in concepts)
-    return f"# {module[3:]}\n\n## 概念入口\n\n{links}\n"
+    links = "\n".join(
+        f"{index}. [[{concept_path(module, index, title)[:-3]}]]"
+        for index, (title, _) in enumerate(concepts, start=1)
+    )
+    return f'''---
+type: module
+tags: [knowledge, knowledge/module]
+---
+
+# {module[3:]}
+
+## 学习目标
+
+按顺序掌握本模块概念，并能解释相邻概念之间的关系。
+
+## 学习顺序
+
+{links}
+
+## 完成标准
+
+- [ ] 能串联解释本模块全部概念
+- [ ] 能完成至少一个最小例子
+- [ ] 能说出本模块与下一模块的连接
+'''
 
 
 def paper_markdown(title: str, record: dict[str, Any]) -> str:
+    display = title.split("_", 1)[1]
     pdf_links = "\n".join(f"- [[99_自动导入/PDF/{name}]]" for name in record["pdfs"])
+    concepts = []
+    for module, entries in KNOWLEDGE_MODULES.items():
+        for index, (concept, _) in enumerate(entries, start=1):
+            if PAPER_BY_CONCEPT.get(concept) == title:
+                concepts.append(f"- [[{concept_path(module, index, concept)[:-3]}]]")
     return f'''---
 type: paper
 status: 待复习
+tags: [knowledge, knowledge/paper]
 ---
 
-# {title}
+# {display}
 
-## 本地材料
+## 支撑概念
+
+{chr(10).join(concepts)}
+
+## 阅读入口
 
 - 精读稿：[[{record["reading"]}]]
 - 中文全文对照稿：[[{record["translation"]}]]
@@ -255,114 +388,313 @@ status: 待复习
 '''
 
 
-def module_canvas(module: str, concepts: list[tuple[str, str]]) -> dict[str, Any]:
-    extra_papers = [PAPER_BY_CONCEPT[title] for title, _ in concepts if title in PAPER_BY_CONCEPT]
-    total_nodes = 1 + len(concepts) + len(extra_papers)
-    rows = (total_nodes + 2) // 3
-    nodes: list[dict[str, Any]] = [group_node(module[3:], 0, 0, 1160, 100 + rows * 220)]
-    overview_path = f"{SUBJECT}/{module}/模块总览.md"
-    overview = file_node(overview_path, 40, 50, color="4")
-    nodes.append(overview)
-    edges: list[dict[str, Any]] = []
-    concept_nodes: dict[str, dict[str, Any]] = {}
+def paper_guide_markdown() -> str:
+    links = "\n".join(f"- [[{PAPER_DIR}/{title}]]" for title in PAPER_WRAPPERS)
+    return f'''---
+type: overview
+tags: [knowledge, knowledge/overview]
+---
+
+# 论文与证据
+
+核心概念先从模块进入；论文用于核对原始证据和扩展阅读。
+
+{links}
+'''
+
+
+def subject_markdown() -> str:
+    links = "\n".join(f"- [[{module_guide_path(module)[:-3]}]]" for module in KNOWLEDGE_MODULES)
+    return f'''---
+type: overview
+tags: [knowledge, knowledge/overview]
+---
+
+# 深度学习与卷积神经网络
+
+从 [[{HOME_CANVAS}]] 开始，按模块编号依次学习。
+
+{links}
+
+- [[{PAPER_DIR}/00_论文导览]]
+'''
+
+
+def module_canvas(module: str, concepts: list[tuple[str, str]], module_index: int) -> dict[str, Any]:
+    rows = min(len(concepts), 6)
+    columns = 1 if len(concepts) <= 6 else 2
+    width = 460 + columns * 400 + 440
+    height = max(420, 190 + rows * 200)
+    nodes: list[dict[str, Any]] = [group_node(module[3:], 0, 0, width, height)]
+    guide = file_node(module_guide_path(module), 40, 70, color=str(module_index))
+    nodes.append(guide)
+    concept_nodes: list[dict[str, Any]] = []
     for index, (title, _) in enumerate(concepts, start=1):
-        row, column = divmod(index, 3)
-        node = file_node(f"{SUBJECT}/{module}/{title}.md", 40 + column * 360, 50 + row * 220)
+        column = 0 if index <= 6 else 1
+        row = (index - 1) % 6
+        node = file_node(concept_path(module, index, title), 440 + column * 400, 70 + row * 200)
         nodes.append(node)
-        concept_nodes[title] = node
-        edges.append(edge(overview["id"], node["id"], "组成"))
-    start = 1 + len(concepts)
-    for offset, paper in enumerate(extra_papers):
-        index = start + offset
-        row, column = divmod(index, 3)
-        node = file_node(f"{SUBJECT}/90_论文证据/{paper}.md", 40 + column * 360, 50 + row * 220, color="5")
-        nodes.append(node)
+        concept_nodes.append(node)
+    edges = [edge(guide["id"], concept_nodes[0]["id"], "开始")]
+    edges.extend(edge(first["id"], second["id"]) for first, second in zip(concept_nodes, concept_nodes[1:]))
+
+    papers = [PAPER_BY_CONCEPT[title] for title, _ in concepts if title in PAPER_BY_CONCEPT]
+    for offset, paper in enumerate(papers):
+        paper_node = file_node(f"{PAPER_DIR}/{paper}.md", 440 + columns * 400, 70 + offset * 200, color="5")
+        nodes.append(paper_node)
         concept = next(title for title, mapped in PAPER_BY_CONCEPT.items() if mapped == paper)
-        edges.append(edge(concept_nodes[concept]["id"], node["id"], "证据支持"))
+        concept_index = next(index for index, (title, _) in enumerate(concepts) if title == concept)
+        edges.append(edge(concept_nodes[concept_index]["id"], paper_node["id"], "论文证据"))
     return {"nodes": nodes, "edges": edges}
 
 
-def subject_canvas() -> dict[str, Any]:
-    nodes: list[dict[str, Any]] = []
+def home_canvas() -> dict[str, Any]:
+    title = text_node(
+        "# 从这里开始\n\n按 01 → 06 学习；论文是证据入口，不是主学习路径。",
+        0,
+        0,
+        1540,
+        180,
+        "4",
+    )
+    nodes: list[dict[str, Any]] = [title]
     module_nodes: list[dict[str, Any]] = []
-    for index, module in enumerate(KNOWLEDGE_MODULES):
-        row, column = divmod(index, 2)
-        x, y = column * 420, row * 280
-        nodes.append(group_node(module[3:], x, y, 380, 240))
-        node = file_node(f"{SUBJECT}/{module}/模块.canvas", x + 30, y + 50, color=str((index % 6) + 1))
+    for index, module in enumerate(KNOWLEDGE_MODULES, start=1):
+        row, column = divmod(index - 1, 3)
+        node = file_node(module_canvas_path(module), column * 400, 240 + row * 230, color=str(index))
         nodes.append(node)
         module_nodes.append(node)
-    labels = ["前置于", "前置于", "组成", "用于", "用于"]
-    edges = [edge(module_nodes[i]["id"], module_nodes[i + 1]["id"], labels[i]) for i in range(5)]
+    papers = file_node(f"{PAPER_DIR}/00_论文导览.md", 0, 730, 1540, 180, "5")
+    nodes.append(papers)
+    edges = [edge(first["id"], second["id"], "下一模块") for first, second in zip(module_nodes, module_nodes[1:])]
     return {"nodes": nodes, "edges": edges}
+
+
+def graph_settings(existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = dict(existing or {})
+    result.update(GRAPH_SETTINGS)
+    return result
+
+
+def generated_layout_files() -> dict[str, str]:
+    usage = f'''# 使用说明
+
+从 [[{HOME_CANVAS}]] 开始浏览。
+
+- 首页负责选择模块，模块 Canvas 负责学习顺序，Markdown 负责正文。
+- 全局图只显示带 `#knowledge` 标签的精选笔记。
+- `99_自动导入` 是 PaperLab 生成副本，不要人工编辑。
+- 学习状态使用：未学、学习中、已理解、待复习。
+'''
+    template = '''---
+type: concept
+status: 未学
+---
+
+# 概念名称
+
+## 一句话理解
+## 为什么重要
+## 核心机制
+## 最小例子
+## 常见误区
+## 与其他概念的关系
+## 学习检查
+'''
+    files = {
+        "00_首页/01_使用说明.md": usage,
+        "90_模板/概念模板.md": template,
+        f"{SUBJECT}/00_学科导览.md": subject_markdown(),
+        f"{PAPER_DIR}/00_论文导览.md": paper_guide_markdown(),
+        HOME_CANVAS: json_text(home_canvas()),
+    }
+    for module_index, (module, concepts) in enumerate(KNOWLEDGE_MODULES.items(), start=1):
+        files[module_guide_path(module)] = module_markdown(module, concepts)
+        files[module_canvas_path(module)] = json_text(module_canvas(module, concepts, module_index))
+        for index in range(1, len(concepts) + 1):
+            files[concept_path(module, index, concepts[index - 1][0])] = concept_markdown(module, index, concepts)
+    for title, record in PAPER_WRAPPERS.items():
+        files[f"{PAPER_DIR}/{title}.md"] = paper_markdown(title, record)
+    return files
 
 
 def bootstrap_vault(vault: Path) -> dict[str, int]:
     vault = Path(vault)
     created = 0
     skipped = 0
-
-    def write(relative: str, text: str) -> None:
-        nonlocal created, skipped
+    for relative, text in generated_layout_files().items():
         if write_if_missing(vault / relative, text):
             created += 1
         else:
             skipped += 1
-
-    usage = f'''# 使用说明
-
-从 [[00_首页/个人知识网络.canvas]] 开始浏览。
-
-- Canvas 负责导航，Markdown 笔记负责正文。
-- `99_自动导入` 是 PaperLab 生成副本，不要人工编辑。
-- 学习状态使用：未学、学习中、已理解、待复习。
-- 关系类型使用：属于、前置于、组成、用于、对比、证据支持。
-'''
-    template = '''---
-type: concept
-status: 未学
-module: ""
----
-
-# 概念名称
-
-## 一句话理解
-
-## 知识网络关系
-
-## 学习检查
-
-- [ ] 能用自己的话解释这个概念
-- [ ] 能说明它与前置知识的关系
-- [ ] 能完成一个最小例子
-'''
-    write("00_首页/使用说明.md", usage)
-    write("90_模板/概念模板.md", template)
-
-    subject_links = "\n".join(f"- [[{SUBJECT}/{module}/模块总览]]" for module in KNOWLEDGE_MODULES)
-    write(f"{SUBJECT}/学科总览.md", f"# 深度学习与卷积神经网络\n\n{subject_links}\n")
-
-    for module, concepts in KNOWLEDGE_MODULES.items():
-        write(f"{SUBJECT}/{module}/模块总览.md", module_markdown(module, concepts))
-        for title, summary in concepts:
-            write(f"{SUBJECT}/{module}/{title}.md", concept_markdown(module, title, summary))
-
-    for title, record in PAPER_WRAPPERS.items():
-        write(f"{SUBJECT}/90_论文证据/{title}.md", paper_markdown(title, record))
-
-    home_canvas = {
-        "nodes": [
-            group_node("个人知识网络", 0, 0, 760, 320),
-            file_node(f"{SUBJECT}/00_总览.canvas", 40, 60, 680, 220, color="5"),
-        ],
-        "edges": [],
-    }
-    write("00_首页/个人知识网络.canvas", json_text(home_canvas))
-    write(f"{SUBJECT}/00_总览.canvas", json_text(subject_canvas()))
-    for module, concepts in KNOWLEDGE_MODULES.items():
-        write(f"{SUBJECT}/{module}/模块.canvas", json_text(module_canvas(module, concepts)))
-
+    if write_if_missing(vault / ".obsidian" / "graph.json", json_text(graph_settings())):
+        created += 1
+    else:
+        skipped += 1
     return {"created": created, "skipped": skipped, "vault": str(vault)}
+
+
+def legacy_path_map(vault: Path) -> list[tuple[Path, Path]]:
+    paths = [
+        (vault / "00_首页" / "个人知识网络.canvas", vault / HOME_CANVAS),
+        (vault / "00_首页" / "使用说明.md", vault / "00_首页" / "01_使用说明.md"),
+        (vault / SUBJECT / "学科总览.md", vault / SUBJECT / "00_学科导览.md"),
+    ]
+    for module, concepts in KNOWLEDGE_MODULES.items():
+        legacy_module = LEGACY_MODULES.get(module, module)
+        old_root = vault / SUBJECT / legacy_module
+        new_root = vault / SUBJECT / module
+        paths.extend(
+            [
+                (old_root / "模块.canvas", vault / module_canvas_path(module)),
+                (old_root / "模块总览.md", vault / module_guide_path(module)),
+            ]
+        )
+        paths.extend(
+            (old_root / f"{title}.md", vault / concept_path(module, index, title))
+            for index, (title, _) in enumerate(concepts, start=1)
+        )
+    for title, record in PAPER_WRAPPERS.items():
+        paths.append(
+            (
+                vault / SUBJECT / "90_论文证据" / f"{record['legacy']}.md",
+                vault / PAPER_DIR / f"{title}.md",
+            )
+        )
+    return paths
+
+
+def legacy_wikilink_map() -> dict[str, str]:
+    links = {
+        "00_首页/个人知识网络": HOME_CANVAS.removesuffix(".canvas"),
+        f"{SUBJECT}/学科总览": f"{SUBJECT}/00_学科导览",
+    }
+    for module, concepts in KNOWLEDGE_MODULES.items():
+        legacy_module = LEGACY_MODULES.get(module, module)
+        old_root = f"{SUBJECT}/{legacy_module}"
+        links[f"{old_root}/模块总览"] = module_guide_path(module).removesuffix(".md")
+        for index, (title, _) in enumerate(concepts, start=1):
+            links[f"{old_root}/{title}"] = concept_path(module, index, title).removesuffix(".md")
+    for title, record in PAPER_WRAPPERS.items():
+        links[f"{SUBJECT}/90_论文证据/{record['legacy']}"] = f"{PAPER_DIR}/{title}"
+    return links
+
+
+def rewrite_legacy_wikilinks(text: str) -> str:
+    links = legacy_wikilink_map()
+
+    def replace(match: re.Match[str]) -> str:
+        content = match.group(1)
+        target_match = re.match(r"([^|#]+)(.*)", content, re.DOTALL)
+        if not target_match:
+            return match.group(0)
+        target, suffix = target_match.groups()
+        replacement = links.get(target.removesuffix(".md").removesuffix(".canvas"))
+        return f"[[{replacement}{suffix}]]" if replacement else match.group(0)
+
+    return re.sub(r"\[\[([^\]]+)\]\]", replace, text)
+
+
+def merge_concept_note(text: str, module: str, index: int, concepts: list[tuple[str, str]]) -> str:
+    title = concepts[index - 1][0]
+    guide = module_guide_path(module)[:-3]
+    if text.startswith("---\n") and "\n---\n" in text[4:]:
+        end = text.find("\n---\n", 4)
+        front = text[4:end].splitlines()
+        body = text[end + 5 :]
+        module_found = False
+        order_found = False
+        for line_index, line in enumerate(front):
+            if line.startswith("module:"):
+                front[line_index] = f'module: "[[{guide}]]"'
+                module_found = True
+            elif line.startswith("order:"):
+                front[line_index] = f"order: {index}"
+                order_found = True
+        if not module_found:
+            front.append(f'module: "[[{guide}]]"')
+        if not order_found:
+            front.append(f"order: {index}")
+        text = "---\n" + "\n".join(front) + "\n---\n" + body
+
+    text = rewrite_legacy_wikilinks(text)
+    text = re.sub(rf"(?m)^# {re.escape(title)}$", f"# {index:02d} {title}", text, count=1)
+    block = navigation_block(module, index, concepts)
+    marker = re.compile(r"<!-- knowledge-nav:start -->.*?<!-- knowledge-nav:end -->", re.DOTALL)
+    if marker.search(text):
+        return marker.sub(block, text, count=1)
+    heading = re.search(r"(?m)^# .+$", text)
+    if heading:
+        return text[: heading.end()] + "\n\n" + block + text[heading.end() :]
+    return block + "\n\n" + text
+
+
+def migrate_vault_layout(vault: Path, dry_run: bool = False) -> dict[str, object]:
+    vault = Path(vault)
+    mappings = legacy_path_map(vault)
+    conflicts = [destination for source, destination in mappings if source.exists() and destination.exists()]
+    if conflicts:
+        joined = ", ".join(str(path) for path in conflicts)
+        raise FileExistsError(f"Migration destination already exists: {joined}")
+
+    moves = [(source, destination) for source, destination in mappings if source.exists()]
+    generated = generated_layout_files()
+    planned: dict[Path, str] = {}
+    source_for_destination = {destination: source for source, destination in moves}
+    for relative, default_text in generated.items():
+        destination = vault / relative
+        current_path = source_for_destination.get(destination, destination)
+        current_text = current_path.read_text(encoding="utf-8") if current_path.exists() else ""
+        if re.match(r"\d\d_.*\.md$", destination.name) and destination.parent.name.startswith("0"):
+            module = destination.parent.name
+            concepts = KNOWLEDGE_MODULES.get(module)
+            if concepts and not destination.name.startswith("00_"):
+                index = int(destination.name[:2])
+                default_text = merge_concept_note(current_text or default_text, module, index, concepts)
+        if current_text != default_text:
+            planned[destination] = default_text
+
+    graph_path = vault / ".obsidian" / "graph.json"
+    existing_graph = json.loads(graph_path.read_text(encoding="utf-8")) if graph_path.exists() else {}
+    graph_text = json_text(graph_settings(existing_graph))
+    if not graph_path.exists() or graph_path.read_text(encoding="utf-8") != graph_text:
+        planned[graph_path] = graph_text
+
+    obsolete = vault / SUBJECT / "00_总览.canvas"
+    removals = [obsolete] if obsolete.exists() else []
+    result: dict[str, object] = {
+        "moved": len(moves),
+        "rewritten": len(planned),
+        "removed": len(removals),
+        "conflicts": [],
+        "backup_dir": "",
+    }
+    if dry_run or (not moves and not planned and not removals):
+        return result
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_dir = vault / ".paperlab-backup" / timestamp
+    backup_sources = {source for source, _ in moves}
+    backup_sources.update(path for path in planned if path.exists() and path not in source_for_destination)
+    backup_sources.update(removals)
+    for path in sorted(backup_sources):
+        target = backup_dir / path.relative_to(vault)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+    for source, destination in moves:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, destination)
+    for path, text in planned.items():
+        atomic_write_text(path, text)
+    for path in removals:
+        path.unlink()
+
+    for directory in [vault / SUBJECT / "90_论文证据", vault / SUBJECT / "04_其他网络架构"]:
+        if directory.exists() and not any(directory.iterdir()):
+            directory.rmdir()
+    result["backup_dir"] = str(backup_dir)
+    return result
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -433,6 +765,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--project", type=Path, required=True)
     sync.add_argument("--pdf-dir", type=Path, required=True)
     sync.add_argument("--vault", type=Path, required=True)
+    migrate = subparsers.add_parser("migrate")
+    migrate.add_argument("--vault", type=Path, required=True)
+    migrate.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -440,8 +775,10 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.command == "bootstrap":
         result = bootstrap_vault(args.vault)
-    else:
+    elif args.command == "sync":
         result = sync_artifacts(args.project, args.pdf_dir, args.vault)
+    else:
+        result = migrate_vault_layout(args.vault, dry_run=args.dry_run)
     print(json.dumps(result, ensure_ascii=False))
     return 0
 
