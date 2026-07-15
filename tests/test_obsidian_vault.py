@@ -55,6 +55,24 @@ def test_bootstrap_creates_curated_three_level_structure_without_overwrite(tmp_p
         assert "## 常见误区" in text
         assert "补充一个可以" not in text
         assert "说明这个概念解决" not in text
+        reflection = (
+            f"10_深度学习与CNN/09_我的理解/{path.parent.name}/"
+            f"{path.stem}-我的理解"
+        )
+        assert f"[[{reflection}|在右侧打开“我的理解”]]" in text
+
+    reflection_root = vault / "10_深度学习与CNN" / "09_我的理解"
+    reflection_notes = sorted(reflection_root.glob("0[1-6]_*/*-我的理解.md"))
+    assert len(reflection_notes) == 45
+    for note in reflection_notes:
+        text = note.read_text(encoding="utf-8")
+        assert "type: reflection" in text
+        assert "tags: [reflection]" in text
+        assert "## 语音记录" in text
+        assert "## 提炼后的理解" in text
+        assert "后续验证" not in text
+        assert "Win+H" not in text
+        assert "VoicePaste" in text
 
     lab_dir = vault / "10_深度学习与CNN" / "08_实验项目"
     lab_notes = sorted(lab_dir.glob("[0-9][0-9]_*.md"))
@@ -202,6 +220,19 @@ def test_migration_aborts_before_writes_when_destination_conflicts(tmp_path: Pat
     assert old_note.read_text(encoding="utf-8") == "old\n"
     assert new_note.read_text(encoding="utf-8") == "new\n"
     assert not list(vault.glob(".paperlab-backup/*"))
+
+
+def test_migration_never_overwrites_existing_reflection(tmp_path: Path):
+    vault = tmp_path / "vault"
+    MODULE.bootstrap_vault(vault)
+    reflection = next((vault / "10_深度学习与CNN" / "09_我的理解").rglob("*-我的理解.md"))
+    original = reflection.read_text(encoding="utf-8") + "\n这是必须逐字保留的语音转写。\n"
+    reflection.write_text(original, encoding="utf-8")
+
+    MODULE.bootstrap_vault(vault)
+    MODULE.migrate_vault_layout(vault)
+
+    assert reflection.read_text(encoding="utf-8") == original
 
 
 def test_refresh_replaces_only_auto_block_and_preserves_human_section_bytes(tmp_path: Path):

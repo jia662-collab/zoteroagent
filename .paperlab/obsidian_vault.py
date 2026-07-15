@@ -24,6 +24,7 @@ SUBJECT = "10_深度学习与CNN"
 HOME_CANVAS = "00_首页/00_从这里开始.canvas"
 PAPER_DIR = f"{SUBJECT}/07_论文与证据"
 LAB_DIR = f"{SUBJECT}/08_实验项目"
+REFLECTION_DIR = f"{SUBJECT}/09_我的理解"
 HUMAN_PROMPT = "在这里记录你的理解、运行结果、错误样本和仍未解决的问题。工作流不会覆盖本节。"
 
 KNOWLEDGE_MODULES = {
@@ -291,6 +292,42 @@ def concept_path(module: str, index: int, title: str) -> str:
     return f"{SUBJECT}/{module}/{index:02d}_{title}.md"
 
 
+def reflection_path(module: str, index: int, title: str) -> str:
+    return f"{REFLECTION_DIR}/{module}/{index:02d}_{title}-我的理解.md"
+
+
+def reflection_markdown(module: str, index: int, title: str) -> str:
+    concept = concept_path(module, index, title)[:-3]
+    return f'''---
+type: reflection
+concept: "[[{concept}]]"
+status: 待提炼
+tags: [reflection]
+---
+
+# 我的理解：{title}
+
+## 语音记录
+
+使用 VoicePaste 快捷键开始表达。
+
+## 提炼后的理解
+
+- 一句话理解：
+- 我的例子：
+- 与已有知识的联系：
+- 仍然不明白：
+'''
+
+
+def reflection_seed_files() -> dict[str, str]:
+    return {
+        reflection_path(module, index, title): reflection_markdown(module, index, title)
+        for module, concepts in KNOWLEDGE_MODULES.items()
+        for index, (title, _) in enumerate(concepts, start=1)
+    }
+
+
 def navigation_block(module: str, index: int, concepts: list[tuple[str, str]]) -> str:
     title = concepts[index - 1][0]
     previous = (
@@ -318,7 +355,7 @@ def lab_note_path(lab_id: str) -> str:
     return f"{LAB_DIR}/{index:02d}_{filename}.md"
 
 
-def lesson_auto_block(module: str, title: str) -> str:
+def lesson_auto_block(module: str, index: int, title: str) -> str:
     lesson = LESSONS[title]
     lab = f"\n关联实验：[[{lab_note_path(lesson.lab)[:-3]}]]\n" if lesson.lab else ""
     formula = f"\n## 公式与符号\n\n{FORMULAS[title]}\n" if title in FORMULAS else ""
@@ -371,6 +408,11 @@ def lesson_auto_block(module: str, title: str) -> str:
 
 {checklist}
 
+## 我的理解
+
+> [!tip] 个人语音笔记
+> [[{reflection_path(module, index, title)[:-3]}|在右侧打开“我的理解”]]
+
 <!-- KNOWLEDGE:AUTO:END -->'''
 
 
@@ -387,7 +429,7 @@ order: {index}
 
 {navigation_block(module, index, concepts)}
 
-{lesson_auto_block(module, title)}
+{lesson_auto_block(module, index, title)}
 
 ## 人工笔记
 
@@ -680,7 +722,8 @@ def bootstrap_vault(vault: Path) -> dict[str, int]:
     vault = Path(vault)
     created = 0
     skipped = 0
-    for relative, text in generated_layout_files().items():
+    files = {**generated_layout_files(), **reflection_seed_files()}
+    for relative, text in files.items():
         if write_if_missing(vault / relative, text):
             created += 1
         else:
@@ -825,7 +868,7 @@ def merge_concept_note(text: str, module: str, index: int, concepts: list[tuple[
     return (
         f"{frontmatter}\n\n# {index:02d} {title}\n\n"
         f"{navigation_block(module, index, concepts)}\n\n"
-        f"{lesson_auto_block(module, title)}\n\n{human_section}"
+        f"{lesson_auto_block(module, index, title)}\n\n{human_section}"
     )
 
 
@@ -841,6 +884,10 @@ def migrate_vault_layout(vault: Path, dry_run: bool = False) -> dict[str, object
     generated = generated_layout_files()
     planned: dict[Path, str] = {}
     source_for_destination = {destination: source for source, destination in moves}
+    for relative, default_text in reflection_seed_files().items():
+        destination = vault / relative
+        if not destination.exists():
+            planned[destination] = default_text
     for relative, default_text in generated.items():
         destination = vault / relative
         current_path = source_for_destination.get(destination, destination)
