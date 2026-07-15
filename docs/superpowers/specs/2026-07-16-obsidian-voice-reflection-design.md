@@ -2,7 +2,7 @@
 
 ## 目标
 
-学习者阅读一个知识点时，可以在右侧并排打开该知识点专属的“我的理解”笔记，使用 Windows 语音输入把想法直接转换为文字。系统只保存文字，不保存录音。
+学习者阅读一个知识点时，可以在右侧并排打开该知识点专属的“我的理解”笔记，使用 VoicePaste 把想法直接转换为文字。系统只保存文字，不保存录音。
 
 设计必须满足：
 
@@ -18,7 +18,7 @@
 - 每个知识点当前已有不会被自动覆盖的人工笔记区。
 - Obsidian 已启用核心 Templates 插件。
 - Obsidian 原生支持左右分栏、内部链接和 Markdown 笔记嵌入。
-- Windows 可在文本输入位置通过 `Win+H` 启动语音输入；该方式需要麦克风、网络和正确的输入语言。
+- VoicePaste 2.1.3 已安装，可通过全局快捷键把语音转写并粘贴到当前文本位置。
 
 ## 选定方案
 
@@ -78,7 +78,7 @@ tags: [reflection]
 
 ### 2026-07-16 20:30
 
-按 Win+H 开始表达。
+使用 VoicePaste 快捷键开始表达。
 
 ## 提炼后的理解
 
@@ -95,7 +95,7 @@ tags: [reflection]
 1. 在左侧打开一个知识点。
 2. 从“我的理解”入口打开对应笔记，并选择右侧分栏。
 3. 在“语音记录”下插入当前日期和时间。
-4. 将光标放在时间标题下，按 `Win+H` 开始表达。
+4. 将光标放在时间标题下，使用 VoicePaste 快捷键开始表达。
 5. 停止语音输入后保留原始转写。
 6. 在“提炼后的理解”中整理一句话理解、个人例子、知识联系和疑问。
 
@@ -123,7 +123,7 @@ tags: [reflection]
 
 ## 异常处理
 
-- `Win+H` 没有文字：先检查光标、网络、麦克风权限、输入设备和当前输入语言。
+- VoicePaste 没有文字：先检查光标、VoicePaste 运行状态、麦克风权限、输入设备和当前语音模型。
 - 转写出现术语错误：保留原始文字，在提炼区修正，不修改正式知识正文。
 - 个人理解文件已存在：工作流跳过创建，只检查双向链接。
 - 知识点更名或移动：迁移映射同时更新入口和 `concept` 链接，但不改个人正文。
@@ -134,7 +134,7 @@ tags: [reflection]
 - 每个正式知识点都有且只有一份对应的个人理解笔记。
 - 每对文件具有可解析的双向链接，没有孤立或失效链接。
 - 知识正文与个人理解可以左右并排使用。
-- 从知识点进入可输入状态不超过两次界面操作，之后使用 `Win+H` 说话。
+- 从知识点进入可输入状态不超过两次界面操作，之后使用 VoicePaste 说话。
 - Vault 中不产生新的音频文件。
 - 连续运行两次生成、迁移和同步流程，第二次为零重复改写。
 - 在个人理解中写入测试文字后重新运行工作流，测试文字逐字保留。
@@ -142,7 +142,7 @@ tags: [reflection]
 
 ## 参考
 
-- Microsoft Windows 语音输入：<https://support.microsoft.com/en-us/windows/use-voice-typing-to-talk-instead-of-type-on-your-pc-fec94565-c4bd-329d-e59a-af033fa5689f>
+- VoicePaste：<https://github.com/that-yolanda/voicepaste>
 - Obsidian 分栏与标签页：<https://obsidian.md/help/tabs>
 - Obsidian Templates：<https://obsidian.md/help/plugins/templates>
 - Obsidian 嵌入文件：<https://obsidian.md/help/embeds>

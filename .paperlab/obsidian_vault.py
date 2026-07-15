@@ -328,6 +328,53 @@ def reflection_seed_files() -> dict[str, str]:
     }
 
 
+def reflection_overview_markdown() -> str:
+    return f'''---
+type: overview
+tags: [reflection]
+---
+
+# 我的理解
+
+## 待提炼
+
+```query
+path:"{REFLECTION_DIR}" tag:#reflection [status:待提炼]
+```
+
+## 已提炼
+
+```query
+path:"{REFLECTION_DIR}" tag:#reflection [status:已提炼]
+```
+'''
+
+
+def reflection_template_markdown() -> str:
+    return '''---
+type: reflection
+concept: "[[]]"
+status: 待提炼
+tags: [reflection]
+---
+
+# 我的理解：{{title}}
+
+## 语音记录
+
+### {{date:YYYY-MM-DD}} {{time:HH:mm}}
+
+使用 VoicePaste 快捷键开始表达。
+
+## 提炼后的理解
+
+- 一句话理解：
+- 我的例子：
+- 与已有知识的联系：
+- 仍然不明白：
+'''
+
+
 def navigation_block(module: str, index: int, concepts: list[tuple[str, str]]) -> str:
     title = concepts[index - 1][0]
     previous = (
@@ -700,9 +747,11 @@ status: 未学
     files = {
         "00_首页/01_使用说明.md": usage,
         "90_模板/概念模板.md": template,
+        "90_模板/个人理解模板.md": reflection_template_markdown(),
         f"{SUBJECT}/00_学科导览.md": subject_markdown(),
         f"{PAPER_DIR}/00_论文导览.md": paper_guide_markdown(),
         f"{PAPER_DIR}/00_必读论文路线.md": paper_roadmap_markdown(),
+        f"{REFLECTION_DIR}/00_我的理解总览.md": reflection_overview_markdown(),
         f"{LAB_DIR}/cnn_labs.py": (PAPERLAB_DIR / "cnn_labs.py").read_text(encoding="utf-8"),
         HOME_CANVAS: json_text(home_canvas()),
     }

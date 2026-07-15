@@ -141,6 +141,23 @@ def test_bootstrap_adds_mathjax_formulas_and_tiered_paper_roadmap(tmp_path: Path
         assert "\\(" not in note and "\\[" not in note, title
 
 
+def test_bootstrap_adds_reflection_overview_and_core_template(tmp_path: Path):
+    vault = tmp_path / "vault"
+    MODULE.bootstrap_vault(vault)
+
+    overview = vault / "10_深度学习与CNN" / "09_我的理解" / "00_我的理解总览.md"
+    template = vault / "90_模板" / "个人理解模板.md"
+    overview_text = overview.read_text(encoding="utf-8")
+    template_text = template.read_text(encoding="utf-8")
+
+    assert "[status:待提炼]" in overview_text
+    assert "[status:已提炼]" in overview_text
+    assert "tag:#reflection" in overview_text
+    assert "{{date:YYYY-MM-DD}} {{time:HH:mm}}" in template_text
+    assert "VoicePaste" in template_text
+    assert "后续验证" not in template_text
+
+
 def test_migration_preserves_note_body_merges_graph_settings_and_is_idempotent(tmp_path: Path):
     assert hasattr(MODULE, "migrate_vault_layout")
     vault = tmp_path / "个人知识网络"
