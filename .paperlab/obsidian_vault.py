@@ -266,6 +266,19 @@ def json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 
 
+def generated_content_equal(path: Path, current: str, expected: str) -> bool:
+    if path.suffix not in {".canvas", ".json"}:
+        return current == expected
+    try:
+        current_value = json.loads(current)
+        expected_value = json.loads(expected)
+    except (json.JSONDecodeError, TypeError):
+        return current == expected
+    if path.suffix == ".canvas":
+        return all(current_value.get(key) == value for key, value in expected_value.items())
+    return current_value == expected_value
+
+
 def module_guide_path(module: str) -> str:
     return f"{SUBJECT}/{module}/00_{module[3:]}-导览.md"
 
@@ -838,13 +851,15 @@ def migrate_vault_layout(vault: Path, dry_run: bool = False) -> dict[str, object
             if concepts and not destination.name.startswith("00_"):
                 index = int(destination.name[:2])
                 default_text = merge_concept_note(current_text or default_text, module, index, concepts)
-        if current_text != default_text:
+        if not generated_content_equal(destination, current_text, default_text):
             planned[destination] = default_text
 
     graph_path = vault / ".obsidian" / "graph.json"
     existing_graph = json.loads(graph_path.read_text(encoding="utf-8")) if graph_path.exists() else {}
     graph_text = json_text(graph_settings(existing_graph))
-    if not graph_path.exists() or graph_path.read_text(encoding="utf-8") != graph_text:
+    if not graph_path.exists() or not generated_content_equal(
+        graph_path, graph_path.read_text(encoding="utf-8"), graph_text
+    ):
         planned[graph_path] = graph_text
 
     obsolete = vault / SUBJECT / "00_总览.canvas"
@@ -910,7 +925,9 @@ def sync_artifacts(project: Path, pdf_dir: Path, vault: Path) -> dict[str, objec
             destination = import_root / category / source.name
             destination_relative = destination.relative_to(vault).as_posix()
             normalized_markdown = (
-                normalize_obsidian_markdown(source.read_text(encoding="utf-8"))
+                rewrite_legacy_wikilinks(
+                    normalize_obsidian_markdown(source.read_text(encoding="utf-8"))
+                )
                 if source.suffix.lower() == ".md"
                 else None
             )

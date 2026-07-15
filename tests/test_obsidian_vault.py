@@ -174,6 +174,12 @@ def test_migration_preserves_note_body_merges_graph_settings_and_is_idempotent(t
     assert graph["search"] == "tag:#knowledge"
     assert graph["hideUnresolved"] is True
 
+    canvas_path = next(vault.rglob("00_神经网络基础.canvas"))
+    canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+    canvas["metadata"] = {"version": "1.0-1.0", "frontmatter": {}}
+    canvas_path.write_text(json.dumps(canvas, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    graph_path.write_text(json.dumps(graph, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
     repeated = MODULE.migrate_vault_layout(vault)
     assert repeated["moved"] == 0
     assert repeated["rewritten"] == 0
@@ -259,12 +265,19 @@ def test_sync_normalizes_latex_delimiters_for_obsidian(tmp_path: Path):
     project = tmp_path / "project"
     source = project / "papers" / "paper.md"
     source.parent.mkdir(parents=True)
-    source.write_text("行内 \\(x+y\\)\n\n\\[\nz=1\n\\]\n", encoding="utf-8")
+    source.write_text(
+        "行内 \\(x+y\\)\n\n\\[\nz=1\n\\]\n"
+        "[[10_深度学习与CNN/90_论文证据/论文-LeNet]]\n",
+        encoding="utf-8",
+    )
 
     vault = tmp_path / "vault"
     result = MODULE.sync_artifacts(project, tmp_path / "pdf", vault)
 
     imported = vault / "99_自动导入" / "精读稿" / "paper.md"
     assert result["copied"] == 1
-    assert imported.read_text(encoding="utf-8") == "行内 $x+y$\n\n$$\nz=1\n$$\n"
+    assert imported.read_text(encoding="utf-8") == (
+        "行内 $x+y$\n\n$$\nz=1\n$$\n"
+        "[[10_深度学习与CNN/07_论文与证据/01_LeNet]]\n"
+    )
     assert MODULE.sync_artifacts(project, tmp_path / "pdf", vault)["unchanged"] == 1
