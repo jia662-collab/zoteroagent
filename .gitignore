@@ -12,4 +12,5 @@ cache/downloads/
 research/
 bibliography/library.bib
 .paperlab/cache/
+.worktrees/
 *.pdf
