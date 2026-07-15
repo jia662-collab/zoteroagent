@@ -27,6 +27,19 @@ class Lab:
     limitations: str
 
 
+@dataclass(frozen=True, slots=True)
+class Paper:
+    tier: str
+    title: str
+    authors: str
+    year: str
+    url: str
+    role: str
+    status: str
+    concepts: tuple[str, ...]
+    wrapper: str = ""
+
+
 TEXTBOOK = "证据类型：教材性知识（当前四篇论文未直接覆盖）。本节用于建立可计算、可检查的基础概念，不冒充论文实验结论。"
 LENET = "论文证据：[[10_深度学习与CNN/07_论文与证据/01_LeNet]]，原 PDF 第 5–10 页、图 2 与表 1；只支持该架构和文档识别条件下的结论。"
 ALEXNET = "论文证据：[[10_深度学习与CNN/07_论文与证据/02_AlexNet]]，原 PDF 第 3–8 页、图 2 与表 1–2；结果依赖 ImageNet、双 GPU 和论文训练协议。"
@@ -556,6 +569,134 @@ LESSONS = {
         ("能区分四类风险", "能计算简单校准差", "能为解释图做 sanity check"),
     ),
 }
+
+
+FORMULAS = {
+    "张量与线性代数": r"""$$
+Y=XW+b,\qquad X\in\mathbb{R}^{N\times d},\quad W\in\mathbb{R}^{d\times m},\quad Y\in\mathbb{R}^{N\times m}
+$$""",
+    "微积分与自动微分": r"""$$
+L=(wx-y)^2,\qquad \frac{\partial L}{\partial w}=2(wx-y)x
+$$""",
+    "概率统计与信息论": r"""$$
+p_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad \mathcal{L}_{CE}=-\log p_y
+$$""",
+    "优化与数值稳定性": r"""$$
+\theta_{t+1}=\theta_t-\eta\nabla_{\theta}\mathcal{L}(\theta_t),\qquad
+\operatorname{softmax}(z)=\operatorname{softmax}(z-\max z)
+$$""",
+    "人工神经元与网络层": r"""$$
+z=w^{\mathsf T}x+b,\qquad a=\phi(z)
+$$""",
+    "激活函数": r"""$$
+\sigma(x)=\frac{1}{1+e^{-x}},\qquad \operatorname{ReLU}(x)=\max(0,x)
+$$""",
+    "前向传播与计算图": r"""$$
+x\longrightarrow z=Wx+b\longrightarrow a=\phi(z)\longrightarrow \hat y\longrightarrow \mathcal{L}(\hat y,y)
+$$""",
+    "损失函数": r"""$$
+\mathcal{L}_{CE}=-\frac{1}{N}\sum_{n=1}^{N}\log p_{n,y_n}
+$$""",
+    "反向传播": r"""$$
+\frac{\partial L}{\partial x}
+=\frac{\partial L}{\partial f}\frac{\partial f}{\partial g}
+\frac{\partial g}{\partial h}\frac{\partial h}{\partial x}
+$$""",
+    "参数初始化与归一化": r"""$$
+\operatorname{Var}(w)\approx\frac{2}{\mathrm{fan\_in}},\qquad
+\hat x=\frac{x-\mu}{\sqrt{\sigma^2+\varepsilon}}
+$$""",
+    "正则化": r"""$$
+\mathcal{L}_{total}=\mathcal{L}_{data}+\lambda\lVert w\rVert_2^2,qquad
+\tilde h=\frac{m\odot h}{1-p}
+$$""",
+    "卷积运算": r"""$$
+y_{o,i,j}=b_o+\sum_c\sum_u\sum_v W_{o,c,u,v}\,x_{c,i+u,j+v}
+$$""",
+    "局部连接与权重共享": r"""$$
+\#\mathrm{params}=C_{out}\bigl(C_{in}K_hK_w+1\bigr)
+$$""",
+    "填充步幅与空洞卷积": r"""$$
+H_{out}=\left\lfloor\frac{H+2P-D(K-1)-1}{S}+1\right\rfloor
+$$""",
+    "感受野": r"""$$
+j_l=j_{l-1}s_l,\qquad r_l=r_{l-1}+(k_l^{eff}-1)j_{l-1}
+$$""",
+    "池化与下采样": r"""$$
+y_{i,j}^{max}=\max_{(u,v)\in R_{i,j}}x_{u,v},\qquad
+y_{i,j}^{avg}=\frac{1}{|R_{i,j}|}\sum_{(u,v)\in R_{i,j}}x_{u,v}
+$$""",
+    "1x1分组与深度可分离卷积": r"""$$
+\#\mathrm{params}_{standard}=K^2C_{in}C_{out},\qquad
+\#\mathrm{params}_{depthwise}=K^2C_{in}+C_{in}C_{out}
+$$""",
+    "LeNet-5": r"""$$
+[N,1,32,32]\rightarrow[N,6,28,28]\rightarrow[N,6,14,14]
+\rightarrow[N,16,10,10]\rightarrow[N,16,5,5]\rightarrow[N,10]
+$$""",
+    "VGG": r"""$$
+3\times(3\times3)\Rightarrow7\times7\ \text{receptive field},\qquad
+27C^2<49C^2
+$$""",
+    "Inception": r"""$$
+\operatorname{Inception}(x)=\operatorname{Concat}\bigl(f_{1\times1}(x),f_{3\times3}(x),f_{5\times5}(x),f_{pool}(x)\bigr)
+$$""",
+    "ResNet": r"""$$
+y=F(x;W)+x,\qquad \frac{\partial y}{\partial x}=\frac{\partial F}{\partial x}+I
+$$""",
+    "DenseNet": r"""$$
+x_l=H_l\bigl([x_0,x_1,\ldots,x_{l-1}]\bigr)
+$$""",
+    "MobileNet与EfficientNet": r"""$$
+d=\alpha^{\phi},\qquad w=\beta^{\phi},\qquad r=\gamma^{\phi},\qquad
+\alpha\beta^2\gamma^2\approx2
+$$""",
+    "分类指标与混淆矩阵": r"""$$
+\mathrm{Precision}=\frac{TP}{TP+FP},\qquad
+\mathrm{Recall}=\frac{TP}{TP+FN},\qquad
+F_1=\frac{2PR}{P+R}
+$$""",
+    "目标检测": r"""$$
+\operatorname{IoU}(A,B)=\frac{|A\cap B|}{|A\cup B|}
+$$""",
+    "语义与实例分割": r"""$$
+\operatorname{Dice}(A,B)=\frac{2|A\cap B|}{|A|+|B|},\qquad
+\operatorname{IoU}(A,B)=\frac{|A\cap B|}{|A\cup B|}
+$$""",
+    "CNN与Transformer混合": r"""$$
+n=\frac{HW}{P^2},\qquad \mathrm{cost}_{attention}=O(n^2d)
+$$""",
+    "模型压缩与部署": r"""$$
+q=\operatorname{clip}\!\left(\operatorname{round}\!\left(\frac{x}{s}\right)+z,\ q_{min},q_{max}\right),
+\qquad \hat x=s(q-z)
+$$""",
+}
+
+
+P = Paper
+PAPER_ROADMAP = (
+    P("导航综述", "Recent Advances in Convolutional Neural Networks", "Jiuxiang Gu et al.", "2018", "https://doi.org/10.1016/j.patcog.2017.10.013", "建立卷积组件、架构、训练与应用的历史地图；只作导航，不替代原始论文。", "精读完成", ("卷积运算", "池化与下采样", "模型压缩与部署"), "[[10_深度学习与CNN/07_论文与证据/04_CNN综述]]"),
+    P("必读主线", "Gradient-Based Learning Applied to Document Recognition", "Yann LeCun, Léon Bottou, Yoshua Bengio, Patrick Haffner", "1998", "https://doi.org/10.1109/5.726791", "理解局部连接、权重共享、下采样、LeNet-5 与端到端梯度学习。", "精读完成", ("卷积运算", "局部连接与权重共享", "LeNet-5"), "[[10_深度学习与CNN/07_论文与证据/01_LeNet]]"),
+    P("必读主线", "ImageNet Classification with Deep Convolutional Neural Networks", "Alex Krizhevsky, Ilya Sutskever, Geoffrey Hinton", "2012", "https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html", "理解 ImageNet 规模、GPU 训练、ReLU、增强与 Dropout 如何共同推动深层 CNN。", "精读完成", ("AlexNet", "激活函数", "数据增强"), "[[10_深度学习与CNN/07_论文与证据/02_AlexNet]]"),
+    P("必读主线", "Very Deep Convolutional Networks for Large-Scale Image Recognition", "Karen Simonyan, Andrew Zisserman", "2015", "https://arxiv.org/abs/1409.1556", "理解连续小卷积核、统一架构族和深度消融。", "精读完成", ("VGG", "感受野"), "[[10_深度学习与CNN/07_论文与证据/03_VGG]]"),
+    P("必读主线", "Going Deeper with Convolutions", "Christian Szegedy et al.", "2015", "https://openaccess.thecvf.com/content_cvpr_2015/html/Szegedy_Going_Deeper_With_2015_CVPR_paper.html", "理解 Inception 多尺度分支和 1×1 瓶颈如何平衡宽度与计算。", "待导入与精读", ("Inception", "1x1分组与深度可分离卷积")),
+    P("必读主线", "Deep Residual Learning for Image Recognition", "Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun", "2016", "https://openaccess.thecvf.com/content_cvpr_2016/html/He_Deep_Residual_Learning_CVPR_2016_paper.html", "理解残差连接为何缓解深层网络的退化与优化困难。", "待导入与精读", ("ResNet", "反向传播")),
+    P("必读主线", "Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift", "Sergey Ioffe, Christian Szegedy", "2015", "https://proceedings.mlr.press/v37/ioffe15.html", "掌握 BatchNorm 的训练/推理统计量、可学习参数和批量依赖。", "待导入与精读", ("参数初始化与归一化",)),
+    P("必读主线", "Dropout: A Simple Way to Prevent Neural Networks from Overfitting", "Nitish Srivastava et al.", "2014", "https://www.jmlr.org/papers/v15/srivastava14a.html", "理解随机失活的训练/推理差异及其正则化边界。", "待导入与精读", ("正则化", "AlexNet")),
+    P("必读主线", "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications", "Andrew G. Howard et al.", "2017", "https://arxiv.org/abs/1704.04861", "理解深度可分离卷积以及精度、延迟和模型大小的权衡。", "待导入与精读", ("1x1分组与深度可分离卷积", "MobileNet与EfficientNet")),
+    P("必读主线", "EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks", "Mingxing Tan, Quoc V. Le", "2019", "https://proceedings.mlr.press/v97/tan19a.html", "理解深度、宽度和输入分辨率的复合缩放。", "待导入与精读", ("MobileNet与EfficientNet",)),
+    P("必读主线", "A ConvNet for the 2020s", "Zhuang Liu et al.", "2022", "https://openaccess.thecvf.com/content/CVPR2022/html/Liu_A_ConvNet_for_the_2020s_CVPR_2022_paper.html", "理解 ConvNeXt 如何用受控消融现代化纯卷积骨干。", "待导入与精读", ("ConvNeXt", "CNN与Transformer混合")),
+    P("必读主线", "An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale", "Alexey Dosovitskiy et al.", "2021", "https://openreview.net/forum?id=YicbFdNTTy", "建立 CNN 与纯视觉 Transformer 的公平比较基线。", "待导入与精读", ("CNN与Transformer混合",)),
+    P("必读主线", "A Simple Framework for Contrastive Learning of Visual Representations", "Ting Chen, Simon Kornblith, Mohammad Norouzi, Geoffrey Hinton", "2020", "https://proceedings.mlr.press/v119/chen20j.html", "理解数据增强、对比目标和线性评估如何构成自监督表征学习。", "待导入与精读", ("自监督与表征学习", "数据增强")),
+    P("任务分支", "Fully Convolutional Networks for Semantic Segmentation", "Jonathan Long, Evan Shelhamer, Trevor Darrell", "2015", "https://openaccess.thecvf.com/content_cvpr_2015/html/Long_Fully_Convolutional_Networks_2015_CVPR_paper.html", "理解分类网络如何变为像素级密集预测以及跳跃融合。", "待导入与精读", ("语义与实例分割", "U-Net")),
+    P("任务分支", "U-Net: Convolutional Networks for Biomedical Image Segmentation", "Olaf Ronneberger, Philipp Fischer, Thomas Brox", "2015", "https://arxiv.org/abs/1505.04597", "理解编码器—解码器、跳跃连接和少样本生物医学分割。", "待导入与精读", ("U-Net", "医学影像与遥感")),
+    P("任务分支", "Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks", "Shaoqing Ren, Kaiming He, Ross Girshick, Jian Sun", "2015", "https://proceedings.neurips.cc/paper_files/paper/2015/hash/14bfa6bb14875e45bba028a21ed38046-Abstract.html", "理解共享卷积特征、区域建议网络和两阶段检测。", "待导入与精读", ("目标检测",)),
+    P("任务分支", "Mask R-CNN", "Kaiming He, Georgia Gkioxari, Piotr Dollár, Ross Girshick", "2017", "https://openaccess.thecvf.com/content_iccv_2017/html/He_Mask_R-CNN_ICCV_2017_paper.html", "理解 RoIAlign 与检测、实例掩膜的并行多任务结构。", "待导入与精读", ("语义与实例分割", "目标检测")),
+    P("任务分支", "Grad-CAM: Visual Explanations from Deep Networks via Gradient-Based Localization", "Ramprasaath R. Selvaraju et al.", "2017", "https://openaccess.thecvf.com/content_iccv_2017/html/Selvaraju_Grad-CAM_Visual_Explanations_ICCV_2017_paper.html", "理解类别梯度如何生成定位热图，以及解释不等于因果证据。", "待导入与精读", ("鲁棒性可解释性与安全",)),
+    P("扩展阅读", "Densely Connected Convolutional Networks", "Gao Huang, Zhuang Liu, Laurens van der Maaten, Kilian Q. Weinberger", "2017", "https://openaccess.thecvf.com/content_cvpr_2017/html/Huang_Densely_Connected_Convolutional_CVPR_2017_paper.html", "比较残差相加与密集拼接的梯度流和特征复用。", "待导入与精读", ("DenseNet",)),
+    P("扩展阅读", "Adam: A Method for Stochastic Optimization", "Diederik P. Kingma, Jimmy Ba", "2015", "https://arxiv.org/abs/1412.6980", "补充自适应一阶优化器的偏差修正和更新规则。", "待导入与精读", ("优化器与学习率",)),
+    P("扩展阅读", "ConvNeXt V2: Co-Designing and Scaling ConvNets with Masked Autoencoders", "Sanghyun Woo et al.", "2023", "https://openaccess.thecvf.com/content/CVPR2023/html/Woo_ConvNeXt_V2_Co-Designing_and_Scaling_ConvNets_With_Masked_Autoencoders_CVPR_2023_paper.html", "观察现代卷积架构与掩码自监督训练的协同设计。", "待导入与精读", ("ConvNeXt", "自监督与表征学习")),
+)
 
 
 def validate_curriculum() -> list[str]:

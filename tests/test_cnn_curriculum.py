@@ -54,3 +54,34 @@ def test_paper_evidence_is_anchored_and_nonpaper_evidence_is_explicit():
             assert "[[10_深度学习与CNN/07_论文与证据/" in lesson.evidence, title
         else:
             assert "教材性知识（当前四篇论文未直接覆盖）" in lesson.evidence, title
+
+
+def test_formulas_use_obsidian_mathjax_delimiters():
+    module = load_curriculum()
+    assert len(module.FORMULAS) >= 20
+
+    for title, formula in module.FORMULAS.items():
+        assert title in module.LESSONS
+        assert formula.startswith("$$\n") and formula.endswith("\n$$"), title
+        assert "\\(" not in formula and "\\)" not in formula, title
+        assert "\\[" not in formula and "\\]" not in formula, title
+
+
+def test_paper_roadmap_is_tiered_verified_and_mapped_to_lessons():
+    module = load_curriculum()
+    papers = module.PAPER_ROADMAP
+    assert len(papers) == 21
+    assert len({paper.title for paper in papers}) == len(papers)
+    assert {paper.tier for paper in papers} == {"导航综述", "必读主线", "任务分支", "扩展阅读"}
+    assert sum(paper.tier == "必读主线" for paper in papers) == 12
+    assert sum(paper.tier == "任务分支" for paper in papers) == 5
+    assert sum(paper.tier == "扩展阅读" for paper in papers) == 3
+
+    for paper in papers:
+        assert paper.url.startswith("https://"), paper.title
+        assert paper.year.isdigit(), paper.title
+        assert paper.role and paper.authors, paper.title
+        assert paper.status in {"精读完成", "待导入与精读"}, paper.title
+        assert all(title in module.LESSONS for title in paper.concepts), paper.title
+        if paper.status == "精读完成":
+            assert paper.wrapper.startswith("[[10_深度学习与CNN/07_论文与证据/"), paper.title

@@ -17,7 +17,7 @@ PAPERLAB_DIR = Path(__file__).resolve().parent
 if str(PAPERLAB_DIR) not in sys.path:
     sys.path.insert(0, str(PAPERLAB_DIR))
 
-from cnn_curriculum import LABS, LESSONS
+from cnn_curriculum import FORMULAS, LABS, LESSONS, PAPER_ROADMAP
 
 
 SUBJECT = "10_深度学习与CNN"
@@ -190,6 +190,11 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def normalize_obsidian_markdown(text: str) -> str:
+    """Use the MathJax delimiters that Obsidian renders reliably."""
+    return text.replace(r"\(", "$").replace(r"\)", "$").replace(r"\[", "$$").replace(r"\]", "$$")
+
+
 def canvas_id(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:12]
 
@@ -303,6 +308,15 @@ def lab_note_path(lab_id: str) -> str:
 def lesson_auto_block(module: str, title: str) -> str:
     lesson = LESSONS[title]
     lab = f"\n关联实验：[[{lab_note_path(lesson.lab)[:-3]}]]\n" if lesson.lab else ""
+    formula = f"\n## 公式与符号\n\n{FORMULAS[title]}\n" if title in FORMULAS else ""
+    related_papers = [paper for paper in PAPER_ROADMAP if title in paper.concepts]
+    recommendations = ""
+    if related_papers:
+        links = []
+        for paper in related_papers:
+            entry = paper.wrapper or f"[[{PAPER_DIR}/00_必读论文路线|{paper.title}]]"
+            links.append(f"- {entry} — {paper.status}")
+        recommendations = "\n## 推荐论文\n\n" + "\n".join(links) + "\n"
     checklist = "\n".join(f"- [ ] {item}" for item in lesson.checklist)
     return f'''<!-- KNOWLEDGE:AUTO:START -->
 
@@ -317,6 +331,7 @@ def lesson_auto_block(module: str, title: str) -> str:
 ## 核心机制
 
 {lesson.mechanism}
+{formula}
 
 ## 具体例子
 
@@ -333,6 +348,7 @@ def lesson_auto_block(module: str, title: str) -> str:
 ## 证据与边界
 
 {lesson.evidence}
+{recommendations}
 
 ## 常见误区
 
@@ -480,8 +496,49 @@ tags: [knowledge, knowledge/overview]
 
 核心概念先从模块进入；论文用于核对原始证据和扩展阅读。
 
+- [[{PAPER_DIR}/00_必读论文路线]]
+
 {links}
 '''
+
+
+def paper_roadmap_markdown() -> str:
+    headings = {
+        "导航综述": "导航综述（1 篇）",
+        "必读主线": "必读主线（12 篇）",
+        "任务分支": "按任务必读（5 篇）",
+        "扩展阅读": "扩展阅读（3 篇）",
+    }
+    sections = []
+    for tier, heading in headings.items():
+        rows = []
+        papers = (paper for paper in PAPER_ROADMAP if paper.tier == tier)
+        for index, paper in enumerate(papers, start=1):
+            concepts = "、".join(
+                f"[[{find_concept_path(title)[:-3]}|{title}]]" for title in paper.concepts
+            )
+            entry = paper.wrapper or f"[{paper.title}]({paper.url})"
+            rows.append(
+                f"### {index}. {paper.title}（{paper.year}）\n\n"
+                f"- 作者：{paper.authors}\n"
+                f"- 状态：**{paper.status}**\n"
+                f"- 入口：{entry}\n"
+                f"- 为什么读：{paper.role}\n"
+                f"- 对应知识：{concepts}"
+            )
+        sections.append(f"## {heading}\n\n" + "\n\n".join(rows))
+    return '''---
+type: paper-roadmap
+tags: [knowledge, knowledge/paper]
+---
+
+# CNN 必读论文路线
+
+这不是按年份堆论文，而是按学习作用分层。**精读完成**表示本地已有全文精读与证据卡；**待导入与精读**只表示元数据和官方入口已核验，不能当作当前知识库的全文证据。
+
+推荐顺序：LeNet → AlexNet → VGG → Inception → ResNet → BatchNorm → MobileNet → EfficientNet → ConvNeXt → ViT。任务论文在学到对应应用时插入。
+
+''' + "\n\n".join(sections) + "\n"
 
 
 def subject_markdown() -> str:
@@ -590,6 +647,7 @@ status: 未学
         "90_模板/概念模板.md": template,
         f"{SUBJECT}/00_学科导览.md": subject_markdown(),
         f"{PAPER_DIR}/00_论文导览.md": paper_guide_markdown(),
+        f"{PAPER_DIR}/00_必读论文路线.md": paper_roadmap_markdown(),
         f"{LAB_DIR}/cnn_labs.py": (PAPERLAB_DIR / "cnn_labs.py").read_text(encoding="utf-8"),
         HOME_CANVAS: json_text(home_canvas()),
     }
@@ -851,11 +909,23 @@ def sync_artifacts(project: Path, pdf_dir: Path, vault: Path) -> dict[str, objec
         for source in sorted(source_dir.glob(pattern)):
             destination = import_root / category / source.name
             destination_relative = destination.relative_to(vault).as_posix()
-            source_hash = file_sha256(source)
+            normalized_markdown = (
+                normalize_obsidian_markdown(source.read_text(encoding="utf-8"))
+                if source.suffix.lower() == ".md"
+                else None
+            )
+            source_hash = (
+                hashlib.sha256(normalized_markdown.encode("utf-8")).hexdigest()
+                if normalized_markdown is not None
+                else file_sha256(source)
+            )
             if destination.exists() and file_sha256(destination) == source_hash:
                 unchanged += 1
             else:
-                atomic_copy(source, destination)
+                if normalized_markdown is not None:
+                    atomic_write_text(destination, normalized_markdown)
+                else:
+                    atomic_copy(source, destination)
                 copied += 1
             current[destination_relative] = {
                 "source": str(source.resolve()),

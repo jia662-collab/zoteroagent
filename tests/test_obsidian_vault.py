@@ -92,6 +92,37 @@ def test_bootstrap_creates_curated_three_level_structure_without_overwrite(tmp_p
     assert edited.read_text(encoding="utf-8") == "人工修改\n"
 
 
+def test_bootstrap_adds_mathjax_formulas_and_tiered_paper_roadmap(tmp_path: Path):
+    vault = tmp_path / "个人知识网络"
+    MODULE.bootstrap_vault(vault)
+
+    roadmap = vault / "10_深度学习与CNN" / "07_论文与证据" / "00_必读论文路线.md"
+    text = roadmap.read_text(encoding="utf-8")
+    assert "## 必读主线（12 篇）" in text
+    assert "## 按任务必读（5 篇）" in text
+    assert "## 扩展阅读（3 篇）" in text
+    assert "Deep Residual Learning for Image Recognition" in text
+    assert "An Image is Worth 16x16 Words" in text
+    assert "Faster R-CNN" in text
+    assert "精读完成" in text
+    assert "待导入与精读" in text
+    assert "[[10_深度学习与CNN/07_论文与证据/01_LeNet]]" in text
+
+    resnet = vault / "10_深度学习与CNN" / "04_经典与现代架构" / "05_ResNet.md"
+    resnet_text = resnet.read_text(encoding="utf-8")
+    assert "## 推荐论文" in resnet_text
+    assert "Deep Residual Learning for Image Recognition" in resnet_text
+    assert "[[10_深度学习与CNN/07_论文与证据/00_必读论文路线|" in resnet_text
+
+    for title, formula in MODULE.FORMULAS.items():
+        matches = list((vault / "10_深度学习与CNN").glob(f"0[1-6]_*/*_{title}.md"))
+        assert len(matches) == 1, title
+        note = matches[0].read_text(encoding="utf-8")
+        assert "## 公式与符号" in note, title
+        assert formula in note, title
+        assert "\\(" not in note and "\\[" not in note, title
+
+
 def test_migration_preserves_note_body_merges_graph_settings_and_is_idempotent(tmp_path: Path):
     assert hasattr(MODULE, "migrate_vault_layout")
     vault = tmp_path / "个人知识网络"
@@ -222,3 +253,18 @@ def test_sync_is_idempotent_atomic_and_preserves_missing_sources(tmp_path: Path)
     manifest = json.loads((vault / "99_自动导入" / "_manifest.json").read_text(encoding="utf-8"))
     assert len({entry["destination"] for entry in manifest["files"]}) == 4
     assert any(entry["status"] == "待同步" for entry in manifest["files"])
+
+
+def test_sync_normalizes_latex_delimiters_for_obsidian(tmp_path: Path):
+    project = tmp_path / "project"
+    source = project / "papers" / "paper.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("行内 \\(x+y\\)\n\n\\[\nz=1\n\\]\n", encoding="utf-8")
+
+    vault = tmp_path / "vault"
+    result = MODULE.sync_artifacts(project, tmp_path / "pdf", vault)
+
+    imported = vault / "99_自动导入" / "精读稿" / "paper.md"
+    assert result["copied"] == 1
+    assert imported.read_text(encoding="utf-8") == "行内 $x+y$\n\n$$\nz=1\n$$\n"
+    assert MODULE.sync_artifacts(project, tmp_path / "pdf", vault)["unchanged"] == 1
