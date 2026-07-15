@@ -6,15 +6,25 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
+PAPERLAB_DIR = Path(__file__).resolve().parent
+if str(PAPERLAB_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPERLAB_DIR))
+
+from cnn_curriculum import LABS, LESSONS
+
+
 SUBJECT = "10_深度学习与CNN"
 HOME_CANVAS = "00_首页/00_从这里开始.canvas"
 PAPER_DIR = f"{SUBJECT}/07_论文与证据"
+LAB_DIR = f"{SUBJECT}/08_实验项目"
+HUMAN_PROMPT = "在这里记录你的理解、运行结果、错误样本和仍未解决的问题。工作流不会覆盖本节。"
 
 KNOWLEDGE_MODULES = {
     "01_数学与计算基础": [
@@ -284,11 +294,59 @@ def navigation_block(module: str, index: int, concepts: list[tuple[str, str]]) -
 <!-- knowledge-nav:end -->"""
 
 
+def lab_note_path(lab_id: str) -> str:
+    index = list(LABS).index(lab_id) + 1
+    filename = LABS[lab_id].title.replace("/", "-")
+    return f"{LAB_DIR}/{index:02d}_{filename}.md"
+
+
+def lesson_auto_block(module: str, title: str) -> str:
+    lesson = LESSONS[title]
+    lab = f"\n关联实验：[[{lab_note_path(lesson.lab)[:-3]}]]\n" if lesson.lab else ""
+    checklist = "\n".join(f"- [ ] {item}" for item in lesson.checklist)
+    return f'''<!-- KNOWLEDGE:AUTO:START -->
+
+## 前情连接与本节目标
+
+本节属于 [[{module_guide_path(module)[:-3]}]]。先明确输入输出、参数和数据形状，再判断该概念在模型中的作用。
+
+## 一句话直觉
+
+{lesson.intuition}
+
+## 核心机制
+
+{lesson.mechanism}
+
+## 具体例子
+
+{lesson.worked_example}
+
+## 在实际工作中的位置
+
+{lesson.work_context}
+
+## 练习或实验
+
+{lesson.practice}
+{lab}
+## 证据与边界
+
+{lesson.evidence}
+
+## 常见误区
+
+{lesson.pitfalls}
+
+## 学习检查
+
+{checklist}
+
+<!-- KNOWLEDGE:AUTO:END -->'''
+
+
 def concept_markdown(module: str, index: int, concepts: list[tuple[str, str]]) -> str:
-    title, summary = concepts[index - 1]
-    evidence = ""
-    if title in PAPER_BY_CONCEPT:
-        evidence = f"- 证据支持：[[{PAPER_DIR}/{PAPER_BY_CONCEPT[title]}]]\n"
+    title = concepts[index - 1][0]
     return f'''---
 type: concept
 status: 未学
@@ -300,35 +358,58 @@ order: {index}
 
 {navigation_block(module, index, concepts)}
 
-## 一句话理解
+{lesson_auto_block(module, title)}
 
-{summary}
+## 人工笔记
 
-## 为什么重要
+{HUMAN_PROMPT}
+'''
 
-说明这个概念解决的问题，以及它在后续网络中的作用。
 
-## 核心机制
+def find_concept_path(title: str) -> str:
+    for module, concepts in KNOWLEDGE_MODULES.items():
+        for index, (concept, _) in enumerate(concepts, start=1):
+            if concept == title:
+                return concept_path(module, index, title)
+    raise KeyError(title)
 
-用公式、数据形状或计算流程解释其工作方式。
 
-## 最小例子
+def lab_markdown(lab_id: str) -> str:
+    lab = LABS[lab_id]
+    related = [title for title, lesson in LESSONS.items() if lesson.lab == lab_id]
+    concept_links = "\n".join(f"- [[{find_concept_path(title)[:-3]}]]" for title in related)
+    return f'''---
+type: lab
+tags: [knowledge, knowledge/lab]
+---
 
-补充一个可以手算或运行的最小例子。
+# {lab.title}
 
-## 常见误区
+## 要回答的问题
 
-记录最容易混淆的概念和适用边界。
+{lab.question}
 
-## 与其他概念的关系
+## 运行命令
 
-- 属于：[[{module_guide_path(module)[:-3]}]]
-{evidence}
-## 学习检查
+```powershell
+{lab.command}
+```
 
-- [ ] 能用自己的话解释这个概念
-- [ ] 能说明它与前置知识的关系
-- [ ] 能完成一个最小例子
+## 预期观察
+
+{lab.expected}
+
+## 如何解释
+
+{lab.interpretation}
+
+## 适用边界
+
+{lab.limitations}
+
+## 关联概念
+
+{concept_links}
 '''
 
 
@@ -493,19 +574,23 @@ status: 未学
 
 # 概念名称
 
-## 一句话理解
-## 为什么重要
+## 前情连接与本节目标
+## 一句话直觉
 ## 核心机制
-## 最小例子
+## 具体例子
+## 在实际工作中的位置
+## 练习或实验
+## 证据与边界
 ## 常见误区
-## 与其他概念的关系
 ## 学习检查
+## 人工笔记
 '''
     files = {
         "00_首页/01_使用说明.md": usage,
         "90_模板/概念模板.md": template,
         f"{SUBJECT}/00_学科导览.md": subject_markdown(),
         f"{PAPER_DIR}/00_论文导览.md": paper_guide_markdown(),
+        f"{LAB_DIR}/cnn_labs.py": (PAPERLAB_DIR / "cnn_labs.py").read_text(encoding="utf-8"),
         HOME_CANVAS: json_text(home_canvas()),
     }
     for module_index, (module, concepts) in enumerate(KNOWLEDGE_MODULES.items(), start=1):
@@ -515,6 +600,8 @@ status: 未学
             files[concept_path(module, index, concepts[index - 1][0])] = concept_markdown(module, index, concepts)
     for title, record in PAPER_WRAPPERS.items():
         files[f"{PAPER_DIR}/{title}.md"] = paper_markdown(title, record)
+    for lab_id in LABS:
+        files[lab_note_path(lab_id)] = lab_markdown(lab_id)
     return files
 
 
@@ -595,13 +682,54 @@ def rewrite_legacy_wikilinks(text: str) -> str:
     return re.sub(r"\[\[([^\]]+)\]\]", replace, text)
 
 
+def extract_human_content(text: str, title: str, summary: str) -> tuple[str, bool]:
+    if "## 人工笔记" in text:
+        return text.split("## 人工笔记", 1)[1], True
+    cleaned = re.sub(r"(?s)^---\n.*?\n---\n", "", text, count=1)
+    cleaned = re.sub(r"<!-- knowledge-nav:start -->.*?<!-- knowledge-nav:end -->", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"<!-- KNOWLEDGE:AUTO:START -->.*?<!-- KNOWLEDGE:AUTO:END -->", "", cleaned, flags=re.DOTALL)
+    ignored = {
+        f"# {title}",
+        f"# {re.escape(title)}",
+        summary,
+        "## 一句话理解",
+        "## 为什么重要",
+        "## 核心机制",
+        "## 最小例子",
+        "## 常见误区",
+        "## 知识网络关系",
+        "## 与其他概念的关系",
+        "## 学习检查",
+        "说明这个概念解决的问题，以及它在后续网络中的作用。",
+        "用公式、数据形状或计算流程解释其工作方式。",
+        "补充一个可以手算或运行的最小例子。",
+        "记录最容易混淆的概念和适用边界。",
+        "- [ ] 能用自己的话解释这个概念",
+        "- [ ] 能说明它与前置知识的关系",
+        "- [ ] 能完成一个最小例子",
+    }
+    retained: list[str] = []
+    for line in cleaned.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if retained and retained[-1] != "":
+                retained.append("")
+            continue
+        if stripped in ignored or re.match(r"^# \d\d ", stripped):
+            continue
+        if stripped.startswith("- 属于：") or stripped.startswith("- 证据支持："):
+            continue
+        retained.append(line)
+    return "\n".join(retained).strip(), False
+
+
 def merge_concept_note(text: str, module: str, index: int, concepts: list[tuple[str, str]]) -> str:
-    title = concepts[index - 1][0]
+    title, summary = concepts[index - 1]
     guide = module_guide_path(module)[:-3]
+    human_content, has_human_section = extract_human_content(text, title, summary)
     if text.startswith("---\n") and "\n---\n" in text[4:]:
         end = text.find("\n---\n", 4)
         front = text[4:end].splitlines()
-        body = text[end + 5 :]
         module_found = False
         order_found = False
         for line_index, line in enumerate(front):
@@ -615,18 +743,19 @@ def merge_concept_note(text: str, module: str, index: int, concepts: list[tuple[
             front.append(f'module: "[[{guide}]]"')
         if not order_found:
             front.append(f"order: {index}")
-        text = "---\n" + "\n".join(front) + "\n---\n" + body
-
-    text = rewrite_legacy_wikilinks(text)
-    text = re.sub(rf"(?m)^# {re.escape(title)}$", f"# {index:02d} {title}", text, count=1)
-    block = navigation_block(module, index, concepts)
-    marker = re.compile(r"<!-- knowledge-nav:start -->.*?<!-- knowledge-nav:end -->", re.DOTALL)
-    if marker.search(text):
-        return marker.sub(block, text, count=1)
-    heading = re.search(r"(?m)^# .+$", text)
-    if heading:
-        return text[: heading.end()] + "\n\n" + block + text[heading.end() :]
-    return block + "\n\n" + text
+        frontmatter = "---\n" + "\n".join(front) + "\n---"
+    else:
+        frontmatter = f'---\ntype: concept\nstatus: 未学\nmodule: "[[{guide}]]"\norder: {index}\n---'
+    if has_human_section:
+        human_section = "## 人工笔记" + human_content
+    else:
+        human_content = rewrite_legacy_wikilinks(human_content)
+        human_section = f"## 人工笔记\n\n{human_content or HUMAN_PROMPT}\n"
+    return (
+        f"{frontmatter}\n\n# {index:02d} {title}\n\n"
+        f"{navigation_block(module, index, concepts)}\n\n"
+        f"{lesson_auto_block(module, title)}\n\n{human_section}"
+    )
 
 
 def migrate_vault_layout(vault: Path, dry_run: bool = False) -> dict[str, object]:

@@ -42,6 +42,25 @@ def test_bootstrap_creates_curated_three_level_structure_without_overwrite(tmp_p
     ]
     assert len(concept_notes) == 45
     assert all("<!-- knowledge-nav:start -->" in path.read_text(encoding="utf-8") for path in concept_notes)
+    for path in concept_notes:
+        text = path.read_text(encoding="utf-8")
+        assert "<!-- KNOWLEDGE:AUTO:START -->" in text
+        assert "<!-- KNOWLEDGE:AUTO:END -->" in text
+        assert "## 人工笔记" in text
+        assert "## 核心机制" in text
+        assert "## 具体例子" in text
+        assert "## 在实际工作中的位置" in text
+        assert "## 练习或实验" in text
+        assert "## 证据与边界" in text
+        assert "## 常见误区" in text
+        assert "补充一个可以" not in text
+        assert "说明这个概念解决" not in text
+
+    lab_dir = vault / "10_深度学习与CNN" / "08_实验项目"
+    lab_notes = sorted(lab_dir.glob("[0-9][0-9]_*.md"))
+    assert len(lab_notes) == 4
+    assert all("cnn_labs.py" in path.read_text(encoding="utf-8") for path in lab_notes)
+    assert (lab_dir / "cnn_labs.py").read_text(encoding="utf-8") == (ROOT / ".paperlab" / "cnn_labs.py").read_text(encoding="utf-8")
 
     home_canvas = json.loads(home.read_text(encoding="utf-8"))
     home_files = [node["file"] for node in home_canvas["nodes"] if node["type"] == "file"]
@@ -107,6 +126,11 @@ def test_migration_preserves_note_body_merges_graph_settings_and_is_idempotent(t
     text = new_note.read_text(encoding="utf-8")
     assert "我自己补充的内容，必须保留。" in text
     assert "<!-- knowledge-nav:start -->" in text
+    assert "<!-- KNOWLEDGE:AUTO:START -->" in text
+    assert "<!-- KNOWLEDGE:AUTO:END -->" in text
+    assert "## 人工笔记\n\n我自己补充的内容，必须保留。" in text
+    assert "## 核心机制" in text
+    assert "## 具体例子" in text
     assert "order: 2" in text
     assert "00_卷积神经网络-导览" in text
     assert "[[10_深度学习与CNN/03_卷积神经网络/00_卷积神经网络-导览]]" in text
@@ -141,6 +165,29 @@ def test_migration_aborts_before_writes_when_destination_conflicts(tmp_path: Pat
     assert old_note.read_text(encoding="utf-8") == "old\n"
     assert new_note.read_text(encoding="utf-8") == "new\n"
     assert not list(vault.glob(".paperlab-backup/*"))
+
+
+def test_refresh_replaces_only_auto_block_and_preserves_human_section_bytes(tmp_path: Path):
+    vault = tmp_path / "vault"
+    MODULE.bootstrap_vault(vault)
+    note = vault / "10_深度学习与CNN" / "03_卷积神经网络" / "02_卷积运算.md"
+    text = note.read_text(encoding="utf-8")
+    text = text.replace(
+        text[text.index("<!-- KNOWLEDGE:AUTO:START -->") : text.index("<!-- KNOWLEDGE:AUTO:END -->") + len("<!-- KNOWLEDGE:AUTO:END -->")],
+        "<!-- KNOWLEDGE:AUTO:START -->\n旧自动内容\n<!-- KNOWLEDGE:AUTO:END -->",
+    )
+    human = "\n\n我的公式：$y=wx+b$  \n旧链接也原样保留：[[10_深度学习与CNN/03_卷积神经网络/模块总览]]\n"
+    text = text.split("## 人工笔记", 1)[0] + "## 人工笔记" + human
+    note.write_text(text, encoding="utf-8")
+
+    refreshed = MODULE.migrate_vault_layout(vault)
+    result = note.read_text(encoding="utf-8")
+    assert refreshed["rewritten"] >= 1
+    assert "旧自动内容" not in result
+    assert result.split("## 人工笔记", 1)[1] == human
+
+    repeated = MODULE.migrate_vault_layout(vault)
+    assert repeated["rewritten"] == 0
 
 
 def test_sync_is_idempotent_atomic_and_preserves_missing_sources(tmp_path: Path):
