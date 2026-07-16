@@ -119,6 +119,64 @@ $$
     assert "(1)" in text
 
 
+def test_requirements_include_matplotlib_math_renderer():
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert "matplotlib" in requirements.casefold()
+
+
+def test_prepare_math_preserves_currency_amounts():
+    engine = runpy.run_path(str(ENGINE))
+
+    text, fragments = engine["_prepare_math"]("paid $5 and $10")
+
+    assert text == "paid $5 and $10"
+    assert fragments == {}
+
+
+def test_prepare_math_still_renders_numeric_display_equation():
+    engine = runpy.run_path(str(ENGINE))
+
+    text, fragments = engine["_prepare_math"]("$$5$$")
+
+    assert "$$" not in text
+    assert len(fragments) == 1
+
+
+def test_export_allows_literal_latex_in_inline_code(tmp_path: Path):
+    source = tmp_path / "literal.md"
+    source.write_text("# Learning\n\nLiteral example: `\\frac{1}{N}`.\n", encoding="utf-8")
+    output = tmp_path / "literal.pdf"
+
+    run_engine("export", "--input", source, "--output", output, "--kind", "learning")
+
+    with fitz.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert r"\frac{1}{N}" in text
+
+
+def test_export_renders_display_math_inside_blockquote(tmp_path: Path):
+    source = tmp_path / "quoted-math.md"
+    source.write_text(
+        r"""# Learning
+
+> $$
+> L=\frac{1}{N}\sum_{i=1}^{N}x_i.
+> $$
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "quoted-math.pdf"
+
+    run_engine("export", "--input", source, "--output", output, "--kind", "learning")
+
+    with fitz.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert r"\frac" not in text
+    assert r"\sum" not in text
+    assert "$$" not in text
+
+
 def test_pdf_validation_rejects_raw_latex_source(tmp_path: Path):
     pdf = tmp_path / "broken.pdf"
     document = fitz.open()

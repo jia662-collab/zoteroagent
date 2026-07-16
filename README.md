@@ -658,7 +658,7 @@ research/events/<项目编号>.jsonl
 
 本节只供维护工具时使用，日常研究不需要执行。
 
-环境要求：Python 3.11 或更高版本、PyMuPDF、pypdf、Markdown、pytest，以及用于本地打印 PDF 的 Microsoft Edge、Chrome 或 Chromium。内部执行器位于 `.paperlab/paperlab.py`，仓库级工作流位于 `.agents/skills/paper-research/`。
+环境要求：Python 3.11 或更高版本、PyMuPDF、pypdf、Markdown、matplotlib、pytest，以及用于本地打印 PDF 的 Microsoft Edge、Chrome 或 Chromium。内部执行器位于 `.paperlab/paperlab.py`，仓库级工作流位于 `.agents/skills/paper-research/`。
 
 运行自动测试：
 

@@ -1141,6 +1141,7 @@ def _prepare_math(text: str) -> tuple[str, dict[str, str]]:
         text,
     )
     text = re.sub(r"(?s)(?P<ticks>`+).+?(?P=ticks)", mask_code, text)
+    text = re.sub(r"(?<![\\$])\$(?!\$)(?=\d)", mask_code, text)
 
     settings = {
         "mathtext.fontset": "custom",
@@ -1177,12 +1178,25 @@ def _prepare_math(text: str) -> tuple[str, dict[str, str]]:
         )
         return image, tag
 
-    def replace_block(match: re.Match[str]) -> str:
+    def block_markup(expression: str) -> str:
         token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
-        image, tag = render(match.group(1), True)
+        image, tag = render(expression, True)
         number = f'<span class="math-number">({html.escape(tag)})</span>' if tag else ""
         math_fragments[token] = image + number
-        return f'\n<div class="math-block">{token}</div>\n'
+        return f'<div class="math-block">{token}</div>'
+
+    def replace_block(match: re.Match[str]) -> str:
+        return f"\n{block_markup(match.group(1))}\n"
+
+    def replace_quoted_block(match: re.Match[str]) -> str:
+        expression = re.sub(r"(?m)^[ \t]*>[ \t]?", "", match.group(1))
+        return f"\n> {block_markup(expression)}\n"
+
+    text = re.sub(
+        r"(?ms)^[ \t]*>[ \t]*\$\$[ \t]*\r?\n(.*?)(?:\r?\n)?[ \t]*>[ \t]*\$\$[ \t]*$",
+        replace_quoted_block,
+        text,
+    )
 
     for pattern in (
         r"(?ms)^[ \t]*\$\$[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?[ \t]*\$\$[ \t]*$",
@@ -1240,10 +1254,17 @@ def validate_exported_pdf(pdf: Path) -> int:
                 raise PaperLabError("export_validation_failed", "browser created an empty PDF")
             for number, page in enumerate(document, 1):
                 text = page.get_text()
+                math_text = "\n".join(
+                    span["text"]
+                    for block in page.get_text("dict")["blocks"]
+                    for line in block.get("lines", ())
+                    for span in line.get("spans", ())
+                    if not re.search(r"consolas|cascadia|mono|courier", span.get("font", ""), re.I)
+                )
                 raw_math = [
                     marker
                     for marker in (r"\frac", r"\sum", r"\tag", r"\begin{", "$$", r"\left", r"\right")
-                    if marker in text
+                    if marker in math_text
                 ]
                 if raw_math:
                     raise PaperLabError(
