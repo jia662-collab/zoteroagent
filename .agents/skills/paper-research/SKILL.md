@@ -68,16 +68,22 @@ Read [references/deep-reading.md](references/deep-reading.md) before any full-te
 2. Run `read --outline`, then read each relevant natural section once. If a section is too large for the platform, divide it by its own subsections or page boundary without introducing a fixed numeric cap or omitting pages.
 3. Stop normal reading at the detected reference boundary. Read relevant appendices; use references only for citation verification.
 4. Produce two distinct manuscripts from the same extraction cache:
-   - `translations/<citation_key>.md`: 中文全文对照版，按原论文的章节与页码对齐，不得压缩成摘要。
+   - `translations/<citation_key>.md`: 中文全文对照版，按原论文的章节与页码对齐；每个单元必须包含同 ID 的英文原文和中文逐句完整翻译，一一对应，不得合并、概括、删减或跳过。
    - `papers/<citation_key>.md`: 精读学习版，沿作者的论证顺序逐节解释，不得用“问题、方法、结果、贡献”重新横向切块。
 5. Record page, section, figure, table, or equation references beside the claim they support. Keep the separate evidence card for later comparison.
 6. Report encrypted, corrupt, or scanned PDFs. Do not run OCR without explicit approval.
 7. For each used figure or table, call `inspect --page <n> --label <label>` first. Render and visually inspect only the final crop; use one low-detail full-page fallback only when matching is uncertain or incomplete.
 8. Save local PNGs under `projects/<id>/assets/<citation_key>/`; place each used image beside the paragraph that teaches it. Reuse assets whose source hash still matches.
-9. Keep hidden `PAPERLAB:FIGURES` JSON in the AUTO block. When refreshing, replace only `PAPERLAB:AUTO`; preserve `## 人工确认` and all user text byte-for-byte.
-10. Export both manuscripts with the engine `export` command to `output/pdf/<project_id>/`. Use `<short_title>_中文全文对照.pdf` and `<short_title>_精读学习.pdf`; do not replace an existing PDF unless the revised manuscript has been validated and `--replace` is explicit.
-11. The Chinese companion must say `机器辅助翻译，原文为准`. The learning PDF must contain a progressive reading route, section transitions, the complete argument chain, limitations, and next reading.
+9. Keep hidden `PAPERLAB:FIGURES` JSON in the AUTO block. When refreshing, replace only `PAPERLAB:AUTO`.
+10. 正式批量导出前，先验证共享导出模板和自动验收规则，再用一篇短稿生成临时样张；临时样张通过后，最后一次性导出本批正式 PDF。Use the engine `export` command to write both manuscripts to `output/pdf/<project_id>/`. Use `<short_title>_中文全文对照.pdf` and `<short_title>_精读学习.pdf`; do not replace an existing PDF unless the revised manuscript has been validated and `--replace` is explicit.
+11. The Chinese companion must say `机器辅助翻译，原文为准`, preserve reference entries in the source language (`参考文献条目保留原文`), and include a `PAPERLAB:TRANSLATION` ledger where `source_units == translated_units` and `omitted_units == 0`. The learning PDF must contain a progressive reading route, section transitions, the complete argument chain, limitations, and next reading.
 12. In the completion response, display only the most useful one or two figures and provide absolute links to both PDFs.
+
+### Obsidian handoff
+
+1. Every completed paper must update its Obsidian 论文节点. Under `阅读入口` or `阅读文件`, the first links must be 原文正文 and every used 补充材料; generated Markdown and PDF links come after them. 不得只列生成稿.
+2. For a Zotero-managed attachment, use `zotero://open-pdf/library/items/<attachment-key>`. For a legal local source not yet in Zotero, use a read-only `[本地原文 PDF](<file:///absolute/path.pdf>)` link; never copy or move the source PDF into the vault.
+3. Before reporting completion, 逐项验证 every original link resolves, every generated artifact exists, and the source PDF hash is unchanged.
 
 Keep this update boundary in both manuscripts:
 
@@ -87,10 +93,6 @@ Keep this update boundary in both manuscripts:
 Automatically generated translation or learning narrative.
 
 <!-- PAPERLAB:AUTO:END -->
-
-## 人工确认
-
-User-maintained content. Codex不得覆盖 this section.
 ```
 
 ## Parallel deep reading
@@ -102,7 +104,7 @@ For two or more requested papers, use 每篇论文一个子代理 when subagents
 3. 只有协调代理可以更新 `PROJECT.md`, `STATUS.md`, `state/<project_id>.json`, events, `synthesis.md`, or Git. Subagents never checkpoint, commit, push, or edit another paper.
 4. Start as many papers as the user requested up to available slots. When slots are fewer than papers, 分波次 without reducing the requested set.
 5. 一个论文失败不得取消其他论文. Preserve successful artifacts and retry only failed or incomplete papers.
-6. As results arrive, the coordinator validates source coverage, page anchors, images, human-section preservation, and source PDF hash. Then it updates state sequentially.
+6. As results arrive, the coordinator validates source coverage, page anchors, images, and source PDF hash. Then it updates state sequentially.
 7. Perform one private backup after the validated batch. Report completed, failed, pending-retry, and next-wave counts.
 8. If subagents are unavailable, run the identical per-paper contract sequentially rather than silently weakening the outputs.
 

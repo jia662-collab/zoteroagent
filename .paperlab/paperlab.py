@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import hashlib
+import io
 import json
 import os
 import re
@@ -997,29 +999,35 @@ def render_page(pdf: Path, page_number: int, output: Path, clip_value: str | Non
 
 
 PDF_CSS = """
-@page { size: A4; margin: 17mm 18mm 18mm; }
+@page { size: A4; margin: 22mm 20mm 20mm; }
 html { color: #171717; background: white; }
 body {
-  font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
-  font-size: 10.5pt;
-  line-height: 1.78;
+  font-family: "SimSun", "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 10.8pt;
+  line-height: 1.82;
   max-width: 100%;
   margin: 0;
   letter-spacing: 0;
 }
-h1, h2, h3, h4 { color: #111; line-height: 1.35; break-after: avoid; }
-h1 { font-size: 23pt; margin: 0 0 10mm; }
-h2 { font-size: 16pt; margin: 9mm 0 3mm; border-bottom: 1px solid #bdbdbd; padding-bottom: 2mm; }
-h3 { font-size: 12.5pt; margin: 6mm 0 2mm; }
+h1, h2, h3, h4 { color: #171717; font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; line-height: 1.35; break-after: avoid; }
+h1 { font-size: 22pt; font-weight: 650; margin: 0 0 11mm; letter-spacing: -0.02em; }
+h2 { font-size: 15pt; font-weight: 650; margin: 9mm 0 3.5mm; border-bottom: 0.35mm solid #252525; padding-bottom: 1.8mm; }
+h3 { font-size: 11.5pt; font-weight: 650; margin: 6mm 0 2.2mm; color: #343434; }
+h4 { font-size: 10pt; margin: 4mm 0 1.5mm; }
 p { margin: 0 0 3.2mm; orphans: 3; widows: 3; text-align: justify; }
-blockquote { margin: 0 0 5mm; padding: 3mm 4mm; border-left: 3px solid #555; background: #f4f4f4; }
+blockquote { margin: 0 0 5mm; padding: 3mm 4mm; border-left: 1mm solid #7a1f2b; background: #f7f5f1; }
 blockquote p { margin: 0; }
 img { display: block; max-width: 100%; max-height: 220mm; margin: 5mm auto 2mm; object-fit: contain; break-inside: avoid; }
+img.math-inline { display: inline-block; max-width: 100%; max-height: none; margin: 0 0.08em; vertical-align: -0.25em; }
+.math-block { display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; margin: 4mm 0; break-inside: avoid; }
+.math-block img { grid-column: 2; display: block; max-width: 100%; max-height: 65mm; margin: 0; }
+.math-number { grid-column: 3; justify-self: end; margin-left: 4mm; white-space: nowrap; }
 table { width: 100%; border-collapse: collapse; margin: 4mm 0; font-size: 9pt; break-inside: avoid; }
 th, td { border: 1px solid #999; padding: 2mm; vertical-align: top; }
 th { background: #ededed; }
 pre, code { font-family: Consolas, "Cascadia Mono", monospace; }
 pre { white-space: pre-wrap; padding: 3mm; background: #f3f3f3; break-inside: avoid; }
+.translation pre, .translation pre code { font-family: Georgia, "Times New Roman", serif; font-size: 8.8pt; line-height: 1.48; padding: 0; background: transparent; break-inside: auto; }
 a { color: #1d4e89; text-decoration: none; }
 hr { border: 0; border-top: 1px solid #aaa; margin: 7mm 0; }
 details { display: block; margin: 4mm 0; }
@@ -1027,6 +1035,12 @@ details > * { display: block !important; }
 summary { font-weight: 700; margin-bottom: 2mm; }
 .source-anchor { color: #555; font-size: 9pt; border-left: 2px solid #777; padding-left: 3mm; }
 .translation-note { background: #fff8db; padding: 3mm; border: 1px solid #d8c46a; }
+.bilingual-pair { margin: 0 0 6mm; }
+.pair-label { margin: 0 0 1.5mm; color: #817a72; font: 700 7.4pt/1.2 "Microsoft YaHei", sans-serif; letter-spacing: 0.08em; break-after: avoid; }
+.pair-label .unit-id { margin-left: 1.5mm; font-family: Georgia, "Times New Roman", serif; font-weight: 400; letter-spacing: 0.03em; }
+.source-text { padding: 3mm 3.5mm 2.6mm; border-top: 0.25mm solid #d5d0c9; background: #f5f4f1; color: #56514c; font-family: Georgia, "Times New Roman", serif; font-size: 9.4pt; line-height: 1.58; }
+.translation-text { margin-top: 1.8mm; padding: 1.4mm 0 0.4mm 3.5mm; border-left: 0.8mm solid #7a1f2b; font-family: "SimSun", "Songti SC", "Noto Serif CJK SC", serif; font-size: 11.1pt; line-height: 1.88; break-inside: avoid; }
+.source-text p:last-child, .translation-text p:last-child { margin-bottom: 0; }
 """
 
 
@@ -1064,10 +1078,35 @@ def find_chromium(explicit: Path | None = None) -> Path:
 
 def validate_manuscript(text: str, kind: str) -> None:
     if kind == "translation":
-        if "机器辅助翻译，原文为准" not in text or "原文 PDF 第" not in text:
+        has_page_anchor = re.search(r"(?:原文|主文|补充材料)\s*PDF\s*第", text) is not None
+        if "机器辅助翻译，原文为准" not in text or not has_page_anchor:
             raise PaperLabError(
                 "invalid_translation",
                 "the Chinese companion requires the translation disclaimer and original PDF page anchors",
+            )
+
+        match = re.search(r"<!--\s*PAPERLAB:TRANSLATION\s+(\{.*?\})\s*-->", text, flags=re.S)
+        try:
+            ledger = json.loads(match.group(1)) if match else {}
+        except json.JSONDecodeError:
+            ledger = {}
+
+        source_ids = re.findall(r"^####\s+原文\s+(\S+)\s*$", text, flags=re.M)
+        translated_ids = re.findall(r"^####\s+译文\s+(\S+)\s*$", text, flags=re.M)
+        source_units = ledger.get("source_units")
+        translated_units = ledger.get("translated_units")
+        omitted_units = ledger.get("omitted_units")
+        valid_ledger = (
+            ledger.get("mode") == "bilingual_sentence_aligned"
+            and isinstance(source_units, int)
+            and source_units > 0
+            and source_units == translated_units == len(source_ids)
+            and omitted_units == 0
+        )
+        if not valid_ledger or source_ids != translated_ids:
+            raise PaperLabError(
+                "invalid_translation",
+                "the Chinese companion requires complete one-to-one English source and Chinese translation units with zero omissions",
             )
         return
 
@@ -1085,6 +1124,147 @@ def validate_manuscript(text: str, kind: str) -> None:
         )
 
 
+def _normalize_math(expression: str) -> tuple[str, str | None]:
+    tag_match = re.search(r"\\tag\{([^{}]*)\}", expression)
+    tag = tag_match.group(1).strip() if tag_match else None
+    expression = re.sub(r"\\tag\{[^{}]*\}", "", expression)
+    expression = re.sub(r"\\frac(?!\{)([0-9A-Za-z])([0-9A-Za-z])", r"\\frac{\1}{\2}", expression)
+    expression = re.sub(r"\\frac(\{[^{}]*\})([0-9A-Za-z])", r"\\frac\1{\2}", expression)
+    expression = re.sub(r"\\frac(?!\{)([0-9A-Za-z])(\{[^{}]*\})", r"\\frac{\1}\2", expression)
+    expression = re.sub(r"\\ge(?![A-Za-z])", r"\\geq", expression)
+    expression = expression.replace(r"\middle", "")
+
+    def replace_cases(match: re.Match[str]) -> str:
+        rows = []
+        for row in re.split(r"\\\\", match.group(1)):
+            row = row.strip().rstrip(",")
+            if row:
+                rows.append(row.replace("&", r"\quad "))
+        return r"\left\{\substack{" + r" \\ ".join(rows) + r"}\right."
+
+    expression = re.sub(
+        r"\\begin\{cases\}(.*?)\\end\{cases\}",
+        replace_cases,
+        expression,
+        flags=re.S,
+    )
+    return re.sub(r"\s+", " ", expression).strip(), tag
+
+
+def _prepare_math(text: str) -> tuple[str, dict[str, str]]:
+    try:
+        from matplotlib import rc_context
+        from matplotlib.font_manager import FontProperties
+        from matplotlib.mathtext import math_to_image
+    except ImportError as error:
+        raise PaperLabError("math_renderer_unavailable", "install matplotlib for PDF math rendering") from error
+
+    code_fragments: dict[str, str] = {}
+    math_fragments: dict[str, str] = {}
+    svg_cache: dict[tuple[str, bool], str] = {}
+
+    def mask_code(match: re.Match[str]) -> str:
+        token = f"PAPERLABCODE{len(code_fragments):06d}TOKEN"
+        code_fragments[token] = match.group(0)
+        return token
+
+    text = re.sub(r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$", mask_code, text)
+    text = re.sub(r"(?s)(?P<ticks>`+).+?(?P=ticks)", mask_code, text)
+    settings = {
+        "mathtext.fontset": "custom",
+        "mathtext.rm": "Microsoft YaHei",
+        "mathtext.it": "STIXGeneral:italic",
+        "mathtext.bf": "STIXGeneral:bold",
+        "mathtext.fallback": "stix",
+        "svg.fonttype": "path",
+    }
+
+    def render(expression: str, display: bool) -> tuple[str, str | None]:
+        normalized, tag = _normalize_math(expression)
+        key = (normalized, display)
+        if key not in svg_cache:
+            content = io.BytesIO()
+            try:
+                with rc_context(settings):
+                    math_to_image(
+                        f"${normalized}$",
+                        content,
+                        prop=FontProperties(size=12 if display else 10.5),
+                        dpi=144,
+                        format="svg",
+                        color="#171717",
+                    )
+            except Exception as error:
+                raise PaperLabError("math_render_failed", f"{normalized}: {error}") from error
+            svg_cache[key] = base64.b64encode(content.getvalue()).decode("ascii")
+        alt = html.escape(re.sub(r"\s+", " ", expression).strip(), quote=True)
+        image_class = "math-block-image" if display else "math-inline"
+        image = f'<img class="{image_class}" alt="{alt}" src="data:image/svg+xml;base64,{svg_cache[key]}">'
+        return image, tag
+
+    def block_markup(expression: str) -> str:
+        token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
+        image, tag = render(expression, True)
+        number = f'<span class="math-number">({html.escape(tag)})</span>' if tag else ""
+        math_fragments[token] = image + number
+        return f'<div class="math-block">{token}</div>'
+
+    def replace_block(match: re.Match[str]) -> str:
+        return f"\n{block_markup(match.group(1))}\n"
+
+    def replace_quoted_block(match: re.Match[str]) -> str:
+        expression = re.sub(r"(?m)^[ \t]*>[ \t]?", "", match.group(1))
+        return f"\n> {block_markup(expression)}\n"
+
+    text = re.sub(
+        r"(?ms)^[ \t]*>[ \t]*\$\$[ \t]*\r?\n(.*?)(?:\r?\n)?[ \t]*>[ \t]*\$\$[ \t]*$",
+        replace_quoted_block,
+        text,
+    )
+    for pattern in (
+        r"(?ms)^[ \t]*\$\$[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?[ \t]*\$\$[ \t]*$",
+        r"(?ms)^[ \t]*\\\[[ \t]*(?:\r?\n)?(.*?)(?:\r?\n)?[ \t]*\\\][ \t]*$",
+    ):
+        text = re.sub(pattern, replace_block, text)
+
+    def replace_inline(match: re.Match[str]) -> str:
+        expression = match.group(1)
+        stripped = expression.strip()
+        if not stripped or stripped != expression or re.search(r"[\u3400-\u9fff]", stripped):
+            return match.group(0)
+        if not (re.search(r"[\\_\^=<>+*/{}()]", stripped) or re.fullmatch(r"[A-Za-z]|\d+(?:\.\d+)?", stripped)):
+            return match.group(0)
+        token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
+        math_fragments[token] = render(expression, False)[0]
+        return token
+
+    text = re.sub(r"(?<!\\)\$(?!\$)([^\n$]+?)(?<!\\)\$(?!\$)", replace_inline, text)
+    text = re.sub(r"\\\(([^\n]+?)\\\)", replace_inline, text)
+    for token, code in code_fragments.items():
+        text = text.replace(token, code)
+    return text, math_fragments
+
+
+def _style_bilingual_body(body: str) -> str:
+    pattern = re.compile(
+        r"<h4>原文\s+([^<]+)</h4>(.*?)<h4>译文\s+\1</h4>(.*?)(?=<h4>原文\s+|<h[1-3]>|$)",
+        flags=re.S,
+    )
+
+    def wrap(match: re.Match[str]) -> str:
+        unit_id = match.group(1)
+        return (
+            '<section class="bilingual-pair">'
+            '<div class="source-text"><div class="pair-label">原文'
+            f'<span class="unit-id">{unit_id}</span></div>{match.group(2)}</div>'
+            '<div class="translation-text"><div class="pair-label">译文'
+            f'<span class="unit-id">{unit_id}</span></div>{match.group(3)}</div>'
+            "</section>"
+        )
+
+    return pattern.sub(wrap, body)
+
+
 def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
     try:
         import markdown
@@ -1094,7 +1274,12 @@ def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
     text = source.read_text(encoding="utf-8") if text is None else text
     title_match = re.search(r"^#\s+(.+)$", text, flags=re.M)
     title = title_match.group(1).strip() if title_match else source.stem
+    text, math_fragments = _prepare_math(text)
     body = markdown.markdown(text, extensions=["tables", "fenced_code", "md_in_html", "sane_lists"])
+    for token, fragment in math_fragments.items():
+        body = body.replace(token, fragment)
+    if kind == "translation":
+        body = _style_bilingual_body(body)
     body = re.sub(r"<details(?![^>]*\bopen\b)", "<details open", body)
     kind_class = "translation" if kind == "translation" else "learning"
     return f"""<!doctype html>
@@ -1109,6 +1294,82 @@ def markdown_document(source: Path, kind: str, text: str | None = None) -> str:
 <body class="{kind_class}">{body}</body>
 </html>
 """
+
+
+def add_pdf_furniture(pdf: Path, title: str, kind: str) -> None:
+    import fitz
+
+    numbered = pdf.with_name(f"{pdf.stem}.numbered.pdf")
+    font_file = next(
+        (path for path in (Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/simsun.ttc")) if path.is_file()),
+        None,
+    )
+    label = "BILINGUAL EDITION" if kind == "translation" else "GUIDED READING EDITION"
+    font_name = "paperlab" if font_file else "helv"
+    with fitz.open(pdf) as document:
+        for index, page in enumerate(document, 1):
+            label_width = fitz.get_text_length(label, fontname="helv", fontsize=7.2)
+            label_x = page.rect.width - 56 - label_width
+            page.insert_text((label_x, 25), label, fontname="helv", fontsize=7.2, color=(0.45, 0.43, 0.4))
+            if font_file:
+                page.insert_textbox(
+                    fitz.Rect(56, 11, label_x - 12, 31),
+                    title,
+                    fontname=font_name,
+                    fontfile=str(font_file),
+                    fontsize=7.2,
+                    color=(0.45, 0.43, 0.4),
+                )
+            page.draw_line((56, 35), (page.rect.width - 56, 35), color=(0.72, 0.69, 0.65), width=0.5)
+            page_number = str(index)
+            width = fitz.get_text_length(page_number, fontname="helv", fontsize=8)
+            page.insert_text(
+                ((page.rect.width - width) / 2, page.rect.height - 18),
+                page_number,
+                fontname="helv",
+                fontsize=8,
+                color=(0.45, 0.43, 0.4),
+                overlay=True,
+            )
+        document.save(numbered, garbage=4, deflate=True)
+    os.replace(numbered, pdf)
+
+
+def validate_exported_pdf(pdf: Path) -> int:
+    try:
+        import fitz
+
+        with fitz.open(pdf) as document:
+            if document.page_count < 1:
+                raise PaperLabError("export_validation_failed", "browser created an empty PDF")
+            for number, page in enumerate(document, 1):
+                text = page.get_text()
+                math_text = "\n".join(
+                    span["text"]
+                    for block in page.get_text("dict")["blocks"]
+                    for line in block.get("lines", ())
+                    for span in line.get("spans", ())
+                    if not re.search(r"consolas|cascadia|mono|courier", span.get("font", ""), re.I)
+                )
+                raw_math = [
+                    marker
+                    for marker in (r"\frac", r"\sum", r"\tag", r"\begin{", "$$", r"\left", r"\right")
+                    if marker in math_text
+                ]
+                if raw_math:
+                    raise PaperLabError(
+                        "export_validation_failed",
+                        f"page {number} contains raw math source: {', '.join(raw_math)}",
+                    )
+                if "\ufffd" in text:
+                    raise PaperLabError("export_validation_failed", f"page {number} contains replacement characters")
+                if not text.strip() and not page.get_images(full=True) and not page.get_drawings():
+                    raise PaperLabError("export_validation_failed", f"page {number} is blank")
+            return document.page_count
+    except PaperLabError:
+        raise
+    except Exception as error:
+        raise PaperLabError("export_validation_failed", str(error)) from error
 
 
 def export_markdown_pdf(
@@ -1135,6 +1396,8 @@ def export_markdown_pdf(
     validate_manuscript(manuscript, kind)
     browser_path = find_chromium(browser)
     rendered_html = markdown_document(source, kind, manuscript)
+    title_match = re.search(r"^#\s+(.+)$", manuscript, flags=re.M)
+    title = title_match.group(1).strip() if title_match else source.stem
     with tempfile.TemporaryDirectory(prefix=".paperlab-export-", dir=output.parent) as temporary:
         temp_dir = Path(temporary)
         html_path = temp_dir / "document.html"
@@ -1158,17 +1421,8 @@ def export_markdown_pdf(
         if completed.returncode != 0 or not pdf_path.is_file():
             message = (completed.stderr or completed.stdout or "browser did not create a PDF").strip()
             raise PaperLabError("export_failed", message[-1000:])
-        try:
-            import fitz
-
-            with fitz.open(pdf_path) as document:
-                if document.page_count < 1:
-                    raise PaperLabError("export_failed", "browser created an empty PDF")
-                page_count = document.page_count
-        except PaperLabError:
-            raise
-        except Exception as error:
-            raise PaperLabError("export_failed", str(error)) from error
+        add_pdf_furniture(pdf_path, title, kind)
+        page_count = validate_exported_pdf(pdf_path)
         if replace:
             os.replace(pdf_path, output)
         else:

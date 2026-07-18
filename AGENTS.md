@@ -20,6 +20,5 @@
 1. 不直接修改 `zotero.sqlite` 或 Zotero `storage`。
 2. 不修改、移动、重命名、覆盖或删除原始 PDF。
 3. 不绕过付费墙、登录、验证码或版权限制。
-4. 自动分析不得覆盖笔记中的“人工确认”部分。
-5. 公开仓库不得提交 `research/`、`bibliography/library.bib`、PDF、全文缓存、密钥、Cookie 或本机 Zotero 路径。
-6. 默认使用中文和 UTF-8。
+4. 公开仓库不得提交 `research/`、`bibliography/library.bib`、PDF、全文缓存、密钥、Cookie 或本机 Zotero 路径。
+5. 默认使用中文和 UTF-8。

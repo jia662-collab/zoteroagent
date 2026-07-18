@@ -41,8 +41,7 @@ def test_skill_protects_human_notes_and_source_evidence():
     combined = text + method
     assert "<!-- PAPERLAB:AUTO:START -->" in text
     assert "<!-- PAPERLAB:AUTO:END -->" in text
-    assert "## 人工确认" in text
-    assert "不得覆盖" in text
+    assert "## 人工确认" not in combined
     assert "作者明确陈述" in combined
     assert "数据直接支持" in combined
     assert "合理推断" in combined
@@ -142,6 +141,48 @@ def test_skill_requires_two_distinct_reading_pdfs_and_progressive_narrative():
     assert "这一节回答了什么" in method
     assert "下一节为什么出现" in method
     assert "原文 PDF 页码" in method
+
+
+def test_skill_requires_complete_bilingual_alignment_and_coverage_ledger():
+    text = SKILL.read_text(encoding="utf-8")
+    method = (SKILL.parent / "references" / "deep-reading.md").read_text(encoding="utf-8")
+    combined = text + method
+
+    for requirement in [
+        "英文原文",
+        "中文逐句完整翻译",
+        "不得合并、概括、删减或跳过",
+        "一一对应",
+        "source_units",
+        "translated_units",
+        "omitted_units",
+        "参考文献条目保留原文",
+    ]:
+        assert requirement in combined
+
+
+def test_skill_requires_original_pdf_links_in_obsidian_paper_notes():
+    text = SKILL.read_text(encoding="utf-8")
+    method = (SKILL.parent / "references" / "deep-reading.md").read_text(encoding="utf-8")
+    combined = text + method
+
+    for requirement in [
+        "Obsidian 论文节点",
+        "原文正文",
+        "补充材料",
+        "zotero://open-pdf",
+        "file:///",
+        "不得只列生成稿",
+        "逐项验证",
+    ]:
+        assert requirement in combined
+
+
+def test_skill_finishes_shared_pdf_workflow_before_formal_batch_export():
+    text = SKILL.read_text(encoding="utf-8")
+
+    for requirement in ["先验证共享导出模板", "临时样张", "最后一次性导出"]:
+        assert requirement in text
 
 
 def test_skill_defines_one_paper_per_subagent_with_coordinator_owned_state():

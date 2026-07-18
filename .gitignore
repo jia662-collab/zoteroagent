@@ -13,4 +13,6 @@ research/
 bibliography/library.bib
 .paperlab/cache/
 .worktrees/
+.superpowers/
+tmp/
 *.pdf
