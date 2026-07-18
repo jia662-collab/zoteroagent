@@ -202,3 +202,21 @@ def test_skill_defines_one_paper_per_subagent_with_coordinator_owned_state():
         "synthesis.md",
     ]:
         assert requirement in combined
+
+
+def test_skill_separates_research_artifacts_from_actual_learning_and_delivery():
+    text = SKILL.read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    combined = text + readme
+
+    for requirement in [
+        "资料状态",
+        "学习状态",
+        "资料准备不等于掌握",
+        "学习入口",
+        "用户能够用自己的话解释",
+        "study-status",
+    ]:
+        assert requirement in combined
+
+    assert "preserve the human section" not in text

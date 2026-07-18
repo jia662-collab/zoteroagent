@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -1489,6 +1490,220 @@ def generate_ris(input_path: Path, ids: list[str], output: Path) -> dict[str, An
     return {"exported": len(exported), "rejected": rejected, "duplicates": duplicates, "output": str(output)}
 
 
+LEARNING_STATUSES = ("未学", "学习中", "已理解", "待复习")
+
+
+def parse_frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---", 4)
+    if end < 0:
+        return {}
+    fields: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        if ":" not in line or line.startswith((" ", "\t")):
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip()] = value.strip().strip('"\'')
+    return fields
+
+
+def markdown_title(text: str, fallback: str) -> str:
+    match = re.search(r"^#\s+(.+?)\s*$", text, flags=re.M)
+    return match.group(1).strip() if match else fallback
+
+
+def legacy_paper_material_status(value: str) -> str:
+    return {
+        "缺PDF": "缺少原文",
+        "待精读": "原文已就绪",
+        "已精读": "学习资料已生成",
+        "待复习": "学习资料已生成",
+    }.get(value, value)
+
+
+def reflection_summary(text: str) -> str:
+    values: list[str] = []
+    voice = re.search(r"^## 语音记录\s*\n(.*?)(?=^## |\Z)", text, flags=re.M | re.S)
+    if voice:
+        value = voice.group(1).strip()
+        if value and value != "使用 VoicePaste 快捷键开始表达。":
+            values.append(value)
+    for label in ("一句话理解", "我的例子", "与已有知识的联系", "仍然不明白"):
+        match = re.search(rf"^-\s*{re.escape(label)}：[ \t]*(.*?)\s*$", text, flags=re.M)
+        if match and match.group(1).strip():
+            values.append(f"{label}：{match.group(1).strip()}")
+    return "；".join(values)
+
+
+def paperlab_status_fields(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    fields: dict[str, str] = {}
+    for label in ("项目", "阶段", "下一步", "待处理", "已选择论文", "已处理论文", "更新时间"):
+        match = re.search(rf"^-\s*{re.escape(label)}：\s*(.+?)\s*$", text, flags=re.M)
+        if match:
+            fields[label] = match.group(1).strip()
+    return fields
+
+
+def study_status(vault: Path, project_status: Path, output: Path) -> dict[str, Any]:
+    vault = vault.expanduser().resolve()
+    project_status = project_status.expanduser().resolve()
+    output = output.expanduser().resolve()
+    if not vault.is_dir():
+        raise PaperLabError("vault_not_found", str(vault))
+
+    notes: list[dict[str, Any]] = []
+    for path in sorted(vault.rglob("*.md")):
+        relative = path.relative_to(vault)
+        if path == output or relative.parts[0].startswith(".") or relative.parts[0] in {"90_模板", "99_自动导入"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        fields = parse_frontmatter(text)
+        note_type = fields.get("type", "")
+        if not note_type or note_type == "learning-state":
+            continue
+        checked = len(re.findall(r"^\s*-\s*\[[xX]\]", text, flags=re.M))
+        open_items = re.findall(r"^\s*-\s*\[ \]\s+(.+?)\s*$", text, flags=re.M)
+        if note_type == "paper":
+            learning = fields.get("study_status", "")
+            material = fields.get("material_status", "") or legacy_paper_material_status(fields.get("status", ""))
+        else:
+            learning = fields.get("study_status", "") or fields.get("status", "")
+            material = ""
+        notes.append(
+            {
+                "path": relative.as_posix(),
+                "title": markdown_title(text, path.stem),
+                "type": note_type,
+                "study_status": learning if learning in LEARNING_STATUSES else "未填写",
+                "material_status": material or "未填写",
+                "checked": checked,
+                "open_items": open_items,
+                "reflection": reflection_summary(text) if note_type == "reflection" else "",
+            }
+        )
+
+    active = [note for note in notes if note["study_status"] == "学习中"]
+    current = active[0] if len(active) == 1 else None
+    candidates = [
+        note
+        for note in notes
+        if note["type"] in {"concept", "paper"} and note["study_status"] != "已理解"
+    ]
+    candidates.sort(
+        key=lambda note: (
+            0 if note["checked"] and note["open_items"] else 1,
+            0 if note["type"] == "concept" else 1,
+            note["path"],
+        )
+    )
+    suggested = current or (candidates[0] if candidates else None)
+
+    study_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    material_counts: Counter[str] = Counter()
+    for note in notes:
+        if note["type"] in {"concept", "paper"}:
+            study_counts[note["type"]][note["study_status"]] += 1
+        if note["type"] == "paper":
+            material_counts[note["material_status"]] += 1
+
+    def public_note(note: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not note:
+            return None
+        return {
+            "title": note["title"],
+            "path": note["path"],
+            "type": note["type"],
+            "study_status": note["study_status"],
+            "checked": note["checked"],
+            "open": len(note["open_items"]),
+            "next_item": note["open_items"][0] if note["open_items"] else "",
+        }
+
+    lines = [
+        "---",
+        "type: learning-state",
+        f"generated_at: {now_iso()}",
+        "source: Obsidian + PaperLab",
+        "---",
+        "",
+        "# 学习状态",
+        "",
+        "> 资料准备不等于掌握。论文下载、翻译、精读稿和证据卡属于资料状态；只有你的解释、作答和实验结果才属于学习状态。",
+        "",
+        "## 现在学什么",
+        "",
+    ]
+    if current:
+        link = current["path"].replace(" ", "%20")
+        lines.append(f"- 当前学习：[{current['title']}]({link})（显式标记为“学习中”）")
+        lines.append(f"- 学习检查：已完成 {current['checked']}，待完成 {len(current['open_items'])}。")
+        if current["open_items"]:
+            lines.append(f"- 下一动作：{current['open_items'][0]}")
+    else:
+        lines.append("- 当前学习：未明确选择。系统不会根据最后修改时间猜测你的学习位置。")
+        if len(active) > 1:
+            lines.append("- 状态冲突：有多篇笔记标记为“学习中”，请只保留一个当前入口。")
+        if suggested:
+            link = suggested["path"].replace(" ", "%20")
+            lines.append(f"- 建议继续：[{suggested['title']}]({link})。确认后把该页标记为“学习中”。")
+
+    lines.extend(["", "## 掌握进度", "", "| 对象 | 未学 | 学习中 | 已理解 | 待复习 | 未填写 |", "|---|---:|---:|---:|---:|---:|"])
+    for note_type, label in (("concept", "知识点"), ("paper", "论文")):
+        counts = study_counts[note_type]
+        lines.append(f"| {label} | {counts['未学']} | {counts['学习中']} | {counts['已理解']} | {counts['待复习']} | {counts['未填写']} |")
+
+    lines.extend(["", "## 论文资料准备", "", "| 资料状态 | 数量 |", "|---|---:|"])
+    for name, count in sorted(material_counts.items()):
+        lines.append(f"| {name} | {count} |")
+    if not material_counts:
+        lines.append("| 暂无论文资料 | 0 |")
+
+    reflections = [note for note in notes if note["reflection"]]
+    lines.extend(["", "## 我的有效学习证据", ""])
+    if reflections:
+        for note in reflections[:8]:
+            link = note["path"].replace(" ", "%20")
+            lines.append(f"- [{note['title']}]({link})：{note['reflection']}")
+    else:
+        lines.append("- 暂无用自己语言写下的理解。自动生成的论文材料不计入掌握证据。")
+
+    project_fields = paperlab_status_fields(project_status)
+    lines.extend(["", "## 研究资料进度", ""])
+    if project_fields:
+        for label, value in project_fields.items():
+            lines.append(f"- {label}：{value}")
+    else:
+        lines.append("- 未找到可读取的 PaperLab 项目状态。")
+
+    lines.extend(
+        [
+            "",
+            "## 判定规则",
+            "",
+            "- `学习中` 必须显式设置；文件更新时间不能改变当前学习位置。",
+            "- `已理解` 只在你能用自己的话解释、完成关键检查并通过一次回忆或实验后设置。",
+            "- 自动更新可以替换资料状态，但不得覆盖你的学习状态和个人理解。",
+            "",
+        ]
+    )
+    atomic_write(output, "\n".join(lines))
+    return {
+        "status": "created",
+        "output": str(output),
+        "current": public_note(current),
+        "suggested": public_note(suggested),
+        "active_conflicts": len(active) if len(active) > 1 else 0,
+        "study_counts": {key: dict(value) for key, value in study_counts.items()},
+        "material_counts": dict(sorted(material_counts.items())),
+        "checked": sum(note["checked"] for note in notes),
+        "open": sum(len(note["open_items"]) for note in notes),
+    }
+
+
 def emit(payload: dict[str, Any]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1556,6 +1771,11 @@ def build_parser() -> argparse.ArgumentParser:
     ris.add_argument("--ids", required=True)
     ris.add_argument("--output", type=Path, required=True)
 
+    study = subparsers.add_parser("study-status")
+    study.add_argument("--vault", type=Path, required=True)
+    study.add_argument("--project-status", type=Path, required=True)
+    study.add_argument("--output", type=Path, required=True)
+
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--data-root", type=Path, required=True)
     doctor_parser.add_argument("--bibtex", type=Path, required=True)
@@ -1581,6 +1801,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return export_markdown_pdf(args.input, args.output, args.kind, args.replace, args.browser)
     if args.command == "ris":
         return generate_ris(args.input, split_csv(args.ids), args.output)
+    if args.command == "study-status":
+        return study_status(args.vault, args.project_status, args.output)
     if args.command == "doctor":
         return doctor(args.data_root, args.bibtex)
     raise PaperLabError("unknown_command", args.command)

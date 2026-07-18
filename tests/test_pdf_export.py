@@ -163,6 +163,23 @@ def test_export_replace_is_atomic_and_reports_new_document(tmp_path: Path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_export_preserves_verified_links_to_local_companion_pdfs(tmp_path: Path):
+    companion = tmp_path / "中文全文对照.pdf"
+    companion.write_bytes(b"existing companion")
+    source = tmp_path / "reading.md"
+    source.write_text(
+        "# 学习入口\n\n[打开中文全文对照 PDF](中文全文对照.pdf)\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "reading.pdf"
+
+    run_engine("export", "--input", source, "--output", output, "--kind", "learning")
+
+    with fitz.open(output) as document:
+        links = [link.get("file", "") for page in document for link in page.get_links()]
+    assert any(path.endswith("%E5%AF%B9%E7%85%A7.pdf") for path in links)
+
+
 def test_export_rejects_translation_without_source_alignment(tmp_path: Path):
     source = tmp_path / "translation.md"
     source.write_text("# 中文全文对照版\n\n只有概括，没有来源定位。\n", encoding="utf-8")

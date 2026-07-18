@@ -95,6 +95,21 @@ Automatically generated translation or learning narrative.
 <!-- PAPERLAB:AUTO:END -->
 ```
 
+## Learn and deliver
+
+Research artifacts and learner mastery are two independent states.
+
+- `material_status`（资料状态）records 原文、中文对照稿、精读稿和图片是否就绪.
+- `study_status`（学习状态）only uses `未学`, `学习中`, `已理解`, or `待复习`.
+- 资料准备不等于掌握. Automatic reading, translation, PDF export, evidence cards, sync, or file modification must never advance `study_status`.
+- Evidence cards are short, source-linked internal indexes for multi-paper comparison. They are not the user's reading material and are not proof that the user learned a paper.
+
+At the end of a research batch, create one `learning/START_HERE.md` and export one `00_<topic>_学习入口.pdf`. It must show the prerequisite route, the exact first lesson, original/Zotero links before generated PDFs, completed material, unresolved gaps, and the next learning action. Do not make the user reconstruct the route from folders.
+
+For an actual learning request, run `study-status` first. Then teach one coherent unit through this loop: diagnose the learner's current explanation, teach one missing idea, return to the exact paper page or figure when evidence matters, give one minimal calculation or experiment, ask for a teach-back, and use one recall question. Mark `已理解` only when 用户能够用自己的话解释, completes the key check, and passes recall or the relevant experiment. Never infer the current lesson from modification time.
+
+The final delivery for each completed paper is: verified original link, Chinese full-text companion PDF, progressive learning PDF, its place in the learning route, and one next action. Refreshing automatic content may replace only the AUTO block; it must preserve personal understanding and learning state.
+
 ## Parallel deep reading
 
 For two or more requested papers, use 每篇论文一个子代理 when subagents are available.
@@ -133,6 +148,6 @@ After each search selection, screening batch, completed paper note, or synthesis
 - Missing BibTeX: give the single Better BibTeX export action needed.
 - Missing PDF: provide legal publisher, DOI, open-access, or repository routes; do not bypass access controls.
 - Missing local figure asset: regenerate it from the hidden render recipe only when the source PDF hash matches.
-- Existing output: preserve the human section and replace only AUTO content.
+- Existing output: preserve personal understanding and learning state, and replace only AUTO content.
 - Tool failure: record it in pending actions, save a checkpoint, and continue independent work.
 - Long task or compaction: reconstruct from project files and artifacts, not remembered conversation details.
