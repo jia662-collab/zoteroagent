@@ -154,42 +154,26 @@ research/projects/<项目编号>/candidates.json
 选择第 5 篇，也就是标题含 Quantum Dot-Based Flexible Photodetectors 的论文。
 ```
 
-## 四、把选中的论文导入 Zotero
+## 四、把选中的论文保存到 Zotero
 
-### 1. 让 Codex 生成 RIS
+默认使用 Zotero Connector，而不是批量 RIS：
 
-在 Codex 中说：
+1. Codex 先同步 Zotero，跳过 DOI 或标题已经存在的论文。
+2. Codex 在 Chrome 中逐篇打开已核验的正式论文页面。
+3. Zotero Connector 一次保存父条目和可获取的 PDF。
+4. 父条目的正式 `Title` 保持不变；`Short Title` 使用 `ResNet`、`BatchNorm` 等简称。
+5. 已有父条目但没有 PDF 时，只在该条目上使用“查找全文”。
+6. 不通过 Zotero Connector 保存裸 PDF 页面，否则 Zotero 可能创建第二个父条目。
 
-```text
-把第 2、5、7 篇导入 Zotero。
-```
-
-Codex 只会导出已经核验过的论文，并自动按 DOI、标准化标题去重。文件生成在：
+Connector 无法识别页面时，先使用 DOI 添加。只有 Connector 和 DOI 都失败，Codex 才为该论文生成单篇兜底文件：
 
 ```text
 research/projects/<项目编号>/zotero_import.ris
 ```
 
-如果某篇来源尚未核验，Codex 会拒绝将它写入 RIS，并告诉你缺少什么证据。
+兜底时在 Zotero 选择“文件 > 导入”，且只导入这一条失败记录。
 
-### 2. 在 Zotero 中导入 RIS
-
-这是整个流程中需要你手动完成的步骤：
-
-1. 打开 Zotero。
-2. 点击顶部菜单“文件 > 导入”。
-3. 选择“文件”，进入下一步。
-4. 选择 Codex 生成的 `zotero_import.ris`。
-5. 按导入向导完成导入。
-6. 在 Zotero 左侧找到新导入的合集或条目。
-7. 检查标题、作者、年份、出版物和 DOI。
-
-RIS 主要导入元数据，**不保证自动带回 PDF**。导入后按以下顺序补附件：
-
-1. 先尝试 Zotero 的“查找可用的 PDF”。
-2. 没找到时，打开 DOI 或出版社页面，使用你的合法访问权限下载。
-3. 将 PDF 拖到对应条目下，确认双击可以打开。
-4. 不要使用非法下载站，不要让 Codex 绕过登录、验证码或付费墙。
+不使用非法下载站，不绕过登录、验证码或付费墙。
 
 等待 Better BibTeX 自动更新几秒，然后回到 Codex 说：
 
@@ -532,21 +516,21 @@ research/events/<项目编号>.jsonl
 
 预期结果：选择被写入项目状态并创建检查点。
 
-### 第 4 步：生成 RIS
+### 第 4 步：通过 Connector 保存
 
 ```text
 把第 2、5、7、9 篇导入 Zotero。
 ```
 
-预期结果：生成 `zotero_import.ris`；无法核验的条目不会导出。
+预期结果：Codex 跳过已有条目，从正式论文页面保存缺失条目；RIS 只处理 Connector 和 DOI 均失败的单篇记录。
 
-### 第 5 步：在 Zotero 手动操作
+### 第 5 步：在 Zotero 验收
 
-1. “文件 > 导入”。
-2. 选择 `zotero_import.ris`。
-3. 检查四篇条目的元数据。
-4. 为每篇添加合法取得的 PDF。
-5. 确认 PDF 可以正常打开。
+1. 每篇论文只有一个父条目。
+2. PDF 位于该父条目下面。
+3. 正式 `Title` 保持原文，`Short Title` 使用模型或方法简称。
+4. 没有 PDF 的已有条目使用“查找全文”。
+5. 出现重复时使用“合并条目”，不要直接删除。
 
 ### 第 6 步：同步和筛选
 
@@ -616,9 +600,9 @@ research/events/<项目编号>.jsonl
 
 核验成功后再生成 RIS。
 
-### 导入 RIS 后没有 PDF
+### Connector 保存后没有 PDF
 
-这是正常现象。RIS 保存的是文献元数据，不是付费全文。使用 Zotero 的“查找可用的 PDF”、Zotero Connector、机构订阅或开放仓储合法获取附件。
+在已有父条目上使用 Zotero 的“查找全文”。不要从裸 PDF 页面再次点击 Connector；这会创建第二个父条目。仍无法获得时保留元数据，并记录为 `missing_pdf`。
 
 ### “继续”后项目不对
 

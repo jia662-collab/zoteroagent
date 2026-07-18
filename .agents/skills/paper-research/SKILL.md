@@ -43,12 +43,14 @@ Use `<repo>/research` as the private data repository and `<repo>/.paperlab/paper
 
 ## Import to Zotero
 
-1. Accept selections such as “第 2、5、7 篇”.
-2. Run `ris` only for selected, verified records and verify the exported count and titles.
-3. Save `zotero_import.ris` in the project directory.
-4. On Windows, open 资源管理器 and select the RIS file. Give its absolute path, record count, and titles in the same response.
-5. Explain once that RIS contains metadata, not PDFs, and ask only for Zotero import plus legal PDF attachment.
-6. Never write directly to Zotero, `zotero.sqlite`, or Zotero `storage`.
+1. Run `sync --candidates` first and skip DOI or exact-title matches already in Zotero.
+2. For a missing record, open its verified 正式论文页面 and save it with Zotero Connector so metadata and an accessible PDF share one parent.
+3. Preserve the official `Title`; set a concise, unique `Short Title` such as `ResNet` or `BatchNorm`.
+4. 不通过 Zotero Connector 保存裸 PDF 页面 when a metadata parent already exists.
+5. If an existing parent has no PDF, use Zotero “查找全文” on that parent.
+6. If Connector fails, use DOI import. RIS 只作为兜底 for the individual record that still fails.
+7. For a RIS fallback, run `ris` only for verified records, save `zotero_import.ris`, and on Windows open 资源管理器 with the file selected. Report its absolute path, count, and titles.
+8. Never write directly to Zotero, `zotero.sqlite`, or Zotero `storage`.
 
 ## Sync and screen
 

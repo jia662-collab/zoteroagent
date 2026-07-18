@@ -22,6 +22,19 @@ def test_repository_skill_declares_natural_language_workflow_and_limits():
     assert len(text.splitlines()) < 300
 
 
+def test_skill_prefers_connector_and_preserves_parent_titles():
+    text = SKILL.read_text(encoding="utf-8")
+    for requirement in [
+        "Zotero Connector",
+        "正式论文页面",
+        "Short Title",
+        "查找全文",
+        "RIS 只作为兜底",
+    ]:
+        assert requirement in text
+    assert "不通过 Zotero Connector 保存裸 PDF 页面" in text
+
+
 def test_skill_protects_human_notes_and_source_evidence():
     text = SKILL.read_text(encoding="utf-8")
     method = (SKILL.parent / "references" / "deep-reading.md").read_text(encoding="utf-8")
