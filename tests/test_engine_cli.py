@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.util
 import json
@@ -417,7 +418,26 @@ def test_render_rejects_invalid_requests_and_overwrite(tmp_path: Path):
     assert occupied.read_bytes() == b"keep me"
 
 
-def test_render_does_not_clobber_file_created_during_atomic_write(tmp_path: Path):
+def test_create_bytes_exclusive_falls_back_when_hard_links_are_unavailable(tmp_path: Path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("paperlab_engine_test", ENGINE)
+    assert spec and spec.loader
+    engine = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(engine)
+    output = tmp_path / "fallback.bin"
+
+    def unavailable(*_args) -> None:
+        raise OSError(errno.EPERM, "hard links unavailable")
+
+    monkeypatch.setattr(engine.os, "link", unavailable)
+    engine.create_bytes_exclusive(output, b"payload")
+
+    assert output.read_bytes() == b"payload"
+    with pytest.raises(FileExistsError):
+        engine.create_bytes_exclusive(output, b"replacement")
+    assert output.read_bytes() == b"payload"
+
+
+def test_render_does_not_clobber_file_created_during_exclusive_write(tmp_path: Path):
     spec = importlib.util.spec_from_file_location("paperlab_engine_test", ENGINE)
     assert spec and spec.loader
     engine = importlib.util.module_from_spec(spec)
@@ -428,13 +448,13 @@ def test_render_does_not_clobber_file_created_during_atomic_write(tmp_path: Path
     doc.save(pdf)
     doc.close()
     output = tmp_path / "race.png"
-    original_write = engine.atomic_write_bytes
+    original_write = engine.create_bytes_exclusive
 
     def create_competing_file(path: Path, content: bytes) -> None:
         path.write_bytes(b"competing writer")
         original_write(path, content)
 
-    engine.atomic_write_bytes = create_competing_file
+    engine.create_bytes_exclusive = create_competing_file
     with pytest.raises(engine.PaperLabError) as error:
         engine.render_page(pdf, 1, output, None)
 

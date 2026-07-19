@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from pypdf import PdfWriter
 
 
@@ -154,6 +155,39 @@ def test_backup_scans_large_text_and_forward_slash_zotero_paths(tmp_path: Path):
         encoding="utf-8",
     )
     assert note.stat().st_size > 2_000_000
+    git(data, "add", str(note.relative_to(data)))
+
+    cp = run_process(
+        "checkpoint",
+        "--data-root",
+        data,
+        "--project",
+        project_id,
+        "--stage",
+        "reading",
+        "--next",
+        "精读",
+        "--backup",
+        "--no-push",
+    )
+
+    assert cp.returncode == 2
+    assert json.loads(cp.stdout)["error"] == "sensitive_backup_content"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"attachment: /Users/researcher/Zotero/storage/ABCD1234/paper.pdf\n",
+        b"attachment: //server/share/Zotero/storage/ABCD1234/paper.pdf\n",
+        b"\xffattachment: /home/researcher/Zotero/storage/ABCD1234/paper.pdf\n",
+    ],
+)
+def test_backup_rejects_posix_unc_and_non_utf8_zotero_paths(tmp_path: Path, content: bytes):
+    data, project_id = init_private_repo(tmp_path)
+    note = data / "projects" / project_id / "papers" / "unsafe.bin"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_bytes(content)
     git(data, "add", str(note.relative_to(data)))
 
     cp = run_process(

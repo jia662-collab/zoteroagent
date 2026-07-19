@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import fitz
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -384,6 +385,23 @@ def test_export_validates_browser_output_before_adding_furniture(tmp_path: Path,
     engine.export_markdown_pdf(source, output, "learning")
 
     assert events == ["validate", "furniture", "validate"]
+
+
+def test_export_reports_browser_timeout_as_export_failure(tmp_path: Path, monkeypatch):
+    engine = load_engine_module()
+    source = tmp_path / "reading.md"
+    source.write_text("# 精读学习版\n\n正文。\n", encoding="utf-8")
+    monkeypatch.setattr(engine, "find_chromium", lambda browser=None: Path("browser.exe"))
+    monkeypatch.setattr(engine, "markdown_document", lambda *args: "<html></html>")
+
+    def time_out(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(engine.subprocess, "run", time_out)
+
+    with pytest.raises(engine.PaperLabError) as error:
+        engine.export_markdown_pdf(source, tmp_path / "reading.pdf", "learning")
+    assert error.value.code == "export_failed"
 
 
 def test_export_adds_a_page_number_footer(tmp_path: Path):

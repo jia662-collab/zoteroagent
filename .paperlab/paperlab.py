@@ -78,7 +78,29 @@ def atomic_write(path: Path, text: str) -> None:
             os.unlink(temporary)
 
 
-def atomic_write_bytes(path: Path, content: bytes) -> None:
+def create_file_exclusive(source: Path, destination: Path) -> None:
+    try:
+        os.link(source, destination)
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        pass
+
+    created = False
+    try:
+        with source.open("rb") as input_handle, destination.open("xb") as output_handle:
+            created = True
+            shutil.copyfileobj(input_handle, output_handle)
+            output_handle.flush()
+            os.fsync(output_handle.fileno())
+    except BaseException:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+
+
+def create_bytes_exclusive(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
@@ -86,7 +108,7 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.link(temporary, path)
+        create_file_exclusive(Path(temporary), path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -368,15 +390,15 @@ def sensitive_staged_paths(data_root: Path, paths: list[str]) -> list[str]:
         if not path.is_file():
             continue
         try:
-            with path.open("r", encoding="utf-8") as handle:
-                carry = ""
+            with path.open("rb") as handle:
+                carry = b""
                 while chunk := handle.read(64 * 1024):
-                    normalized_text = (carry + chunk).replace("\\", "/")
-                    if re.search(r"(?i)[a-z]:/[^\r\n]*/zotero/storage/", normalized_text):
+                    normalized_content = (carry + chunk).replace(b"\\", b"/").lower()
+                    if b"/zotero/storage/" in normalized_content:
                         problems.append(relative)
                         break
-                    carry = normalized_text[-4096:]
-        except (UnicodeDecodeError, OSError):
+                    carry = normalized_content[-4096:]
+        except OSError:
             continue
     return problems
 
@@ -988,7 +1010,7 @@ def render_page(pdf: Path, page_number: int, output: Path, clip_value: str | Non
     except Exception as error:
         raise PaperLabError("render_failed", str(error)) from error
     try:
-        atomic_write_bytes(output, content)
+        create_bytes_exclusive(output, content)
         status = "created"
     except FileExistsError:
         if output.read_bytes() == content:
@@ -1424,7 +1446,10 @@ def export_markdown_pdf(
             f"--print-to-pdf={pdf_path}",
             html_path.as_uri(),
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as error:
+            raise PaperLabError("export_failed", "browser PDF export timed out after 120 seconds") from error
         if completed.returncode != 0 or not pdf_path.is_file():
             message = (completed.stderr or completed.stdout or "browser did not create a PDF").strip()
             raise PaperLabError("export_failed", message[-1000:])
@@ -1435,7 +1460,7 @@ def export_markdown_pdf(
             os.replace(pdf_path, output)
         else:
             try:
-                os.link(pdf_path, output)
+                create_file_exclusive(pdf_path, output)
             except FileExistsError as error:
                 raise PaperLabError("output_exists", str(output)) from error
 
