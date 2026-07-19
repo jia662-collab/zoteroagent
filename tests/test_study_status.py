@@ -103,6 +103,22 @@ def test_explicit_learning_status_is_the_only_current_position(tmp_path: Path):
     assert result["current"]["next_item"] == "能手算输出形状"
 
 
+def test_multiple_active_notes_require_resolution_without_a_suggestion(tmp_path: Path):
+    vault = tmp_path / "vault"
+    write_note(vault / "知识" / "卷积.md", note_type="concept", fields={"status": "学习中"})
+    write_note(vault / "知识" / "池化.md", note_type="concept", fields={"status": "学习中"})
+    project_status = tmp_path / "STATUS.md"
+    output = vault / "00_首页" / "学习状态.md"
+    write_project_status(project_status)
+
+    result = run_study_status(vault, project_status, output)
+
+    assert result["current"] is None
+    assert result["suggested"] is None
+    assert result["active_conflicts"] == 2
+    assert "建议继续" not in output.read_text(encoding="utf-8")
+
+
 def test_paper_material_and_mastery_are_counted_separately(tmp_path: Path):
     vault = tmp_path / "vault"
     write_note(

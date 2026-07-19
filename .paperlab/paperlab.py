@@ -451,6 +451,12 @@ def doctor(data_root: Path, bibtex: Path) -> dict[str, Any]:
     except Exception:
         markdown_ready = False
     try:
+        import matplotlib  # noqa: F401
+
+        matplotlib_ready = True
+    except Exception:
+        matplotlib_ready = False
+    try:
         browser = str(find_chromium())
     except PaperLabError:
         browser = ""
@@ -467,10 +473,11 @@ def doctor(data_root: Path, bibtex: Path) -> dict[str, Any]:
         "pymupdf": pymupdf,
         "pypdf": pypdf_ready,
         "markdown": markdown_ready,
+        "matplotlib": matplotlib_ready,
         "pdf_browser": browser,
         "git": run_git(data_root.resolve(), "--version", check=False).returncode == 0,
     }
-    required = ("private_git_repo", "bibtex", "pymupdf", "pypdf", "markdown", "pdf_browser", "git")
+    required = ("private_git_repo", "bibtex", "pymupdf", "pypdf", "markdown", "matplotlib", "pdf_browser", "git")
     return {"ready": all(checks[key] for key in required), "checks": checks}
 
 
@@ -1229,11 +1236,10 @@ def _prepare_math(text: str) -> tuple[str, dict[str, str]]:
         text = re.sub(pattern, replace_block, text)
 
     def replace_inline(match: re.Match[str]) -> str:
-        expression = match.group(1)
-        stripped = expression.strip()
-        if not stripped or stripped != expression or re.search(r"[\u3400-\u9fff]", stripped):
+        expression = match.group(1).strip()
+        if not expression or re.search(r"[\u3400-\u9fff]", expression):
             return match.group(0)
-        if not (re.search(r"[\\_\^=<>+*/{}()]", stripped) or re.fullmatch(r"[A-Za-z]|\d+(?:\.\d+)?", stripped)):
+        if not (re.search(r"[\\_\^=<>+*/{}()]", expression) or re.fullmatch(r"[A-Za-z]|\d+(?:\.\d+)?", expression)):
             return match.group(0)
         token = f"PAPERLABMATH{len(math_fragments):06d}TOKEN"
         math_fragments[token] = render(expression, False)[0]
@@ -1422,6 +1428,7 @@ def export_markdown_pdf(
         if completed.returncode != 0 or not pdf_path.is_file():
             message = (completed.stderr or completed.stdout or "browser did not create a PDF").strip()
             raise PaperLabError("export_failed", message[-1000:])
+        validate_exported_pdf(pdf_path)
         add_pdf_furniture(pdf_path, title, kind)
         page_count = validate_exported_pdf(pdf_path)
         if replace:
@@ -1600,7 +1607,7 @@ def study_status(vault: Path, project_status: Path, output: Path) -> dict[str, A
             note["path"],
         )
     )
-    suggested = current or (candidates[0] if candidates else None)
+    suggested = current or (candidates[0] if candidates and not active else None)
 
     study_counts: dict[str, Counter[str]] = defaultdict(Counter)
     material_counts: Counter[str] = Counter()

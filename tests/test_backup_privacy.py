@@ -293,6 +293,7 @@ def test_doctor_reports_local_readiness(tmp_path: Path):
     assert result["checks"]["pymupdf"] is True
     assert result["checks"]["pypdf"] is True
     assert result["checks"]["markdown"] is True
+    assert result["checks"]["matplotlib"] is True
     assert Path(result["checks"]["pdf_browser"]).name.lower() in {"msedge.exe", "chrome.exe", "chromium.exe"}
 
 

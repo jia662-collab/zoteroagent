@@ -352,6 +352,40 @@ def test_inline_math_keeps_chinese_prose_and_currency_outside_formula_images():
     assert all("区域；输出" not in fragment for fragment in fragments.values())
 
 
+def test_inline_math_renders_expressions_with_padding_spaces():
+    engine = load_engine_module()
+
+    prepared, fragments = engine._prepare_math(r"损失为 $ L = 0 $，输入为 $ x_i $。")
+
+    assert "$ L = 0 $" not in prepared
+    assert "$ x_i $" not in prepared
+    assert len(fragments) == 2
+
+
+def test_export_validates_browser_output_before_adding_furniture(tmp_path: Path, monkeypatch):
+    engine = load_engine_module()
+    source = tmp_path / "reading.md"
+    source.write_text("# 精读学习版\n\n正文。\n", encoding="utf-8")
+    output = tmp_path / "reading.pdf"
+    events: list[str] = []
+
+    monkeypatch.setattr(engine, "find_chromium", lambda browser=None: Path("browser.exe"))
+    monkeypatch.setattr(engine, "markdown_document", lambda *args: "<html></html>")
+
+    def fake_run(command, **kwargs):
+        target = Path(next(value.split("=", 1)[1] for value in command if value.startswith("--print-to-pdf=")))
+        target.write_bytes(b"browser pdf")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    monkeypatch.setattr(engine, "validate_exported_pdf", lambda pdf: events.append("validate") or 1)
+    monkeypatch.setattr(engine, "add_pdf_furniture", lambda *args: events.append("furniture"))
+
+    engine.export_markdown_pdf(source, output, "learning")
+
+    assert events == ["validate", "furniture", "validate"]
+
+
 def test_export_adds_a_page_number_footer(tmp_path: Path):
     source = tmp_path / "numbered.md"
     source.write_text("# Publisher Proof\n\nBody without digits.\n", encoding="utf-8")
