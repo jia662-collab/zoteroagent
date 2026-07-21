@@ -313,6 +313,54 @@ L=\frac{1}{N}\sum_{i=1}^{N}x_i.
     assert "(1)" in text
 
 
+def test_export_allows_literal_latex_in_inline_code(tmp_path: Path):
+    source = tmp_path / "literal.md"
+    source.write_text("# Learning\n\nLiteral example: `\\frac{1}{N}`.\n", encoding="utf-8")
+    output = tmp_path / "literal.pdf"
+
+    run_engine("export", "--input", source, "--output", output, "--kind", "learning")
+
+    with fitz.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert r"\frac{1}{N}" in text
+
+
+def test_export_renders_display_math_inside_blockquote(tmp_path: Path):
+    source = tmp_path / "quoted-math.md"
+    source.write_text(
+        r"""# Learning
+
+> $$
+> L=\frac{1}{N}\sum_{i=1}^{N}x_i.
+> $$
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "quoted-math.pdf"
+
+    run_engine("export", "--input", source, "--output", output, "--kind", "learning")
+
+    with fitz.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert r"\frac" not in text
+    assert r"\sum" not in text
+    assert "$$" not in text
+
+
+def test_pdf_validation_rejects_raw_latex_source(tmp_path: Path):
+    pdf = tmp_path / "broken.pdf"
+    document = fitz.open()
+    document.new_page().insert_text((72, 72), r"L=\frac{1}{N}")
+    document.save(pdf)
+    document.close()
+    engine = load_engine_module()
+
+    with pytest.raises(engine.PaperLabError) as error:
+        engine.validate_exported_pdf(pdf)
+
+    assert error.value.code == "export_validation_failed"
+
+
 def test_markdown_document_uses_approved_publisher_bilingual_layout(tmp_path: Path):
     source = tmp_path / "publisher.md"
     source.write_text(
